@@ -1,3 +1,5 @@
+from . import journal
+
 import codecs
 import datetime
 import glob
@@ -36,25 +38,19 @@ class FileDoesNotExistError(Exception):
 class FileExistsError(Exception):
 	pass
 
-class MetadataLog:
-	def __init__(self, filename):
-		self.f = open(filename, 'ab')
-	
-	def append(self, source, hash, op, *args, time = None):
-		self.f.write(b'1\t' + b'\t'.join(str(x).encode('unicode-escape') for x in (((time or datetime.datetime.now()).strftime('%FT%T'), source, hash, op) + args)) + b'\n')
-
 class Database:
 	def __init__(self, db_path):
 		self.db_path = db_path
 		self.init_if_needed()
-		self.metadata_log = MetadataLog(path.join(self.db_path, 'metadata.log'))
+		self.journal = journal.Journal(path.join(self.db_path, 'journal'))
 
 	def init_if_needed(self):
 		if not path.isdir(self.db_path):
 			os.mkdir(self.db_path)
+			os.mkdir(path.join(self.db_path, 'files'))
 
 	def get_directory_for_hash(self, hash):
-		return path.join(self.db_path, 'objects', hash[0:2])
+		return path.join(self.db_path, 'files', hash[0:2])
 
 	def get_filename_for_hash(self, hash):
 		return path.join(self.get_directory_for_hash(hash), hash)
@@ -69,7 +65,7 @@ class Database:
 		if path.exists(filename):
 			raise FileExistsError(hash)
 
-		self.metadata_log.append('auto', hash, 'create')
+		self.journal.append('auto', hash, 'create')
 
 		if move:
 			try:
@@ -107,7 +103,7 @@ class Database:
 		return File(hash, {})
 
 	def delete(self, f):
-		self.metadata_log.append('auto', hash, 'delete')
+		self.journal.append('auto', hash, 'delete')
 		self.unlink(self.get_filename_for_hash(hash))
 
 		try:
@@ -118,4 +114,4 @@ class Database:
 	def save(self, f):
 		t = datetime.datetime.now()
 		for source, key, value in f.modifications:
-			self.metadata_log.append(source, f.hash, 'set', key, value, time = t)
+			self.journal.append(source, f.hash, 'set', key, value, time = t)
