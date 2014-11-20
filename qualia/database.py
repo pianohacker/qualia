@@ -28,7 +28,7 @@ class File:
 		self.modifications.append((source, key, value))
 	
 	def import_fs_metadata(self, filename):
-		self.set_metadata('filename', path.abspath(filename), 'auto')
+		self.set_metadata('original-filename', path.abspath(filename), 'auto')
 
 class AmbiguousHashError(Exception):
 	pass
@@ -58,7 +58,7 @@ class Database:
 	def get_filename_for_hash(self, hash):
 		return path.join(self.get_directory_for_hash(hash), hash)
 	
-	def add_file(self, source_file, move = False):
+	def add_file(self, source_file, move = False, source = 'user'):
 		hash = hashlib.sha512(source_file.read()).hexdigest()
 		source_file.seek(0)
 
@@ -68,7 +68,7 @@ class Database:
 		if path.exists(filename):
 			raise FileExistsError(hash)
 
-		self.journal.append('auto', hash, 'create')
+		self.journal.append(source, hash, 'create')
 
 		if move:
 			try:
@@ -85,8 +85,8 @@ class Database:
 
 		return File(self, hash, {})
 
-	def add(self, source_filename):
-		return self.add_file(open(source_filename, 'rb'))
+	def add(self, source_filename, *args, **kwargs):
+		return self.add_file(open(source_filename, 'rb'), *args, **kwargs)
 
 	def find_hashes(self, prefix):
 		# Note: this is a bit of a hack. Here be dragons.
@@ -118,8 +118,8 @@ class Database:
 
 		return File(self, hash, self.searchdb.get(hash))
 
-	def delete(self, f):
-		self.journal.append('auto', hash, 'delete')
+	def delete(self, f, source = 'user'):
+		self.journal.append(source, hash, 'delete')
 		self.unlink(self.get_filename_for_hash(hash))
 
 		try:
@@ -131,3 +131,8 @@ class Database:
 		t = datetime.datetime.now()
 		for source, key, value in f.modifications:
 			self.journal.append(source, f.hash, 'set', key, value, time = t)
+
+		for source, key, value in f.modifications:
+			self.searchdb.set(f.hash, key, value)
+
+		f.modifications = []

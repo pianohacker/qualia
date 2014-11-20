@@ -25,3 +25,10 @@ class SearchDatabase:
 			result = dict(results[0]) if len(results) == 1 else {}
 
 		return result
+
+	def set(self, hash, key, value):
+		if key != 'comments': return
+
+		writer = self.index.writer()
+		writer.update_document(hash = hash, **dict([(key, value)]))
+		writer.commit()

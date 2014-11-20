@@ -40,6 +40,17 @@ def command_find_hashes(db, args):
 	for hash in db.find_hashes(args.prefix):
 		print(hash)
 
+### `set`
+def command_set(db, args):
+	try:
+		f = db.get(args.hash)
+		f.set_metadata(args.key, args.value)
+		db.save(f)
+	except database.AmbiguousHashError:
+		print('{}: ambiguous hash'.format(args.hash))
+	except database.FileDoesNotExistError:
+		print('{}: does not exist'.format(args.hash))
+
 ### `show`
 def command_show(db, args):
 	for hash in args.hash:
@@ -48,6 +59,7 @@ def command_show(db, args):
 			print('{}:'.format(f.short_hash))
 			for key, value in f.metadata.items():
 				print('    {}: {}'.format(key, value))
+
 		except database.AmbiguousHashError:
 			print('{}: ambiguous hash'.format(hash))
 		except database.FileDoesNotExistError:
@@ -73,8 +85,7 @@ def main():
 	)
 
 	parser.add_argument('--db',
-		help = 'Database path',
-		default = database.get_default_path()
+		help = 'Database path'
 	)
 
 	subparsers = parser.add_subparsers(
@@ -124,6 +135,23 @@ def main():
 	)
 
 	p = subparsers.add_parser(
+		'set',
+		help = 'Set metadata for a given file',
+	)
+	p.add_argument('hash',
+		help = 'Hash of file to change',
+		metavar = 'HASH',
+	)
+	p.add_argument('key',
+		help = 'Metadata key',
+		metavar = 'KEY',
+	)
+	p.add_argument('value',
+		help = 'Metadata value',
+		metavar = 'VALUE',
+	)
+
+	p = subparsers.add_parser(
 		'show',
 		help = 'Show metadata for selected files',
 	)
@@ -137,4 +165,6 @@ def main():
 
 	db = database.Database(args.db)
 
+	# `args.command` should be limited to the defined subcommands, but there's not much risk here
+	# anyway.
 	sys.exit(globals()['command_' + args.command.replace('-', '_')](db, args) or 0)
