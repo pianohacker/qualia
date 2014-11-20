@@ -40,6 +40,21 @@ def command_find_hashes(db, args):
 	for hash in db.find_hashes(args.prefix):
 		print(hash)
 
+### `show`
+def command_show(db, args):
+	for hash in args.hash:
+		try:
+			f = db.get(hash)
+			print('{}:'.format(f.short_hash))
+			for key, value in f.metadata.items():
+				print('    {}: {}'.format(key, value))
+		except database.AmbiguousHashError:
+			print('{}: ambiguous hash'.format(hash))
+		except database.FileDoesNotExistError:
+			print('{}: does not exist'.format(hash))
+
+		print()
+
 # From http://stackoverflow.com/a/13429281
 class SubcommandHelpFormatter(argparse.RawDescriptionHelpFormatter):
 	def _format_action(self, action):
@@ -79,7 +94,6 @@ def main():
 		nargs = '+',
 		type = argparse.FileType('rb'),
 	)
-	p.set_defaults(func = command_add)
 
 	p = subparsers.add_parser(
 		'delete',
@@ -91,8 +105,6 @@ def main():
 		metavar = 'HASH',
 		nargs = '+',
 	)
-	p.set_defaults(func = command_delete)
-
 	p = subparsers.add_parser(
 		'exists',
 		help = 'Check whether a file exists and set exit status accordingly',
@@ -101,7 +113,6 @@ def main():
 		help = 'hash of file to check for',
 		metavar = 'HASH',
 	)
-	p.set_defaults(func = command_exists)
 
 	p = subparsers.add_parser(
 		'find-hashes',
@@ -111,10 +122,19 @@ def main():
 		help = 'prefix to hashes to look for',
 		metavar = 'PREFIX',
 	)
-	p.set_defaults(func = command_find_hashes)
+
+	p = subparsers.add_parser(
+		'show',
+		help = 'Show metadata for selected files',
+	)
+	p.add_argument('hash',
+		help = 'Hashes of files to show',
+		metavar = 'HASH',
+		nargs = '+',
+	)
 
 	args = parser.parse_args()
 
 	db = database.Database(args.db)
 
-	sys.exit(args.func(db, args) or 0)
+	sys.exit(globals()['command_' + args.command.replace('-', '_')](db, args) or 0)

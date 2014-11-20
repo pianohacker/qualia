@@ -25,7 +25,7 @@ class Journal:
 				);
 			""")
 
-		self.db.execute("PRAGMA user_version = 1")
+			self.db.execute("PRAGMA user_version = 1")
 	
 	def append(self, source, file, op, *args, time = None):
 		cur = self.db.cursor()

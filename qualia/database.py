@@ -1,4 +1,4 @@
-from . import journal
+from . import journal, search
 
 import codecs
 import datetime
@@ -13,14 +13,15 @@ def get_default_path():
 	return path.expanduser('~/q')
 
 class File:
-	def __init__(self, hash, metadata):
+	def __init__(self, db, hash, metadata):
+		self.db = db
 		self.hash = hash
 		self.metadata = metadata
 		self.modifications = []
 
 	@property
 	def short_hash(self):
-		return self.hash[0:8]
+		return self.db.get_shortest_hash(self.hash)
 
 	def set_metadata(self, key, value, source = 'user'):
 		self.metadata[key] = value
@@ -43,11 +44,13 @@ class Database:
 		self.db_path = db_path
 		self.init_if_needed()
 		self.journal = journal.Journal(path.join(self.db_path, 'journal'))
+		self.searchdb = search.SearchDatabase(path.join(self.db_path, 'search'))
 
 	def init_if_needed(self):
-		if not path.isdir(self.db_path):
+		if not path.exists(self.db_path):
 			os.mkdir(self.db_path)
 			os.mkdir(path.join(self.db_path, 'files'))
+			os.mkdir(path.join(self.db_path, 'search'))
 
 	def get_directory_for_hash(self, hash):
 		return path.join(self.db_path, 'files', hash[0:2])
@@ -78,7 +81,9 @@ class Database:
 			# copy
 			shutil.copyfileobj(source_file, open(filename, 'wb'))
 
-		return File(hash, {})
+		self.searchdb.add(hash)
+
+		return File(self, hash, {})
 
 	def add(self, source_filename):
 		return self.add_file(open(source_filename, 'rb'))
@@ -88,19 +93,30 @@ class Database:
 		# TODO: Remove dragons
 		for filename in glob.iglob(self.get_filename_for_hash(prefix + '*')):
 			yield path.basename(filename)
+	
+	def get_shortest_hash(self, hash):
+		baselen = 8
+
+		while True:
+			result = self.find_hashes(hash[:baselen])
+			_, extra = next(result, None), next(result, None)
+
+			if extra is None: break
+			baselen += 2
+
+		return hash[:baselen]
 
 	def get(self, short_hash):
 		result = self.find_hashes(short_hash)
+		hash, extra = next(result, None), next(result, None)
 
-		try:
-			hash = next(result)
-		except StopIteration:
+		if hash is None:
 			raise FileDoesNotExistError(short_hash)
 
-		if next(result, None):
+		if extra is not None:
 			raise AmbiguousHashError(short_hash)
 
-		return File(hash, {})
+		return File(self, hash, self.searchdb.get(hash))
 
 	def delete(self, f):
 		self.journal.append('auto', hash, 'delete')
