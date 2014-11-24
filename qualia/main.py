@@ -1,10 +1,29 @@
 ## Imports
-from . import config, database
+from . import common, config, database
 
 import argparse
 import os
 import shutil
 import sys
+
+## Utility functions
+def error(message, *args):
+	print('qualia:', message.format(*args), file = sys.stderr)
+
+def show_file(db, f, args):
+	if args.format == 'filename':
+		print(db.get_filename(f))
+	elif args.format == 'hash':
+		print(f.hash)
+	elif args.format == 'long':
+		print('{}:'.format(f.short_hash))
+		for field in sorted(f.metadata.keys()):
+			print('    {}: {}'.format(field, f.metadata[field]))
+		print()
+	elif args.format == 'short_hash':
+		print(f.short_hash)
+
+OUTPUT_FORMATS = ['filename', 'short_hash', 'hash', 'long']
 
 ## Commands
 ### `add`/`take`
@@ -15,16 +34,16 @@ def command_add(db, args):
 			f.import_fs_metadata(sf.name)
 			db.save(f)
 			print('{}: {}'.format(sf.name, f.short_hash))
-		except database.FileExistsError:
-			print('{}: identical file in database, not added'.format(sf.name))
+		except common.FileExistsError:
+			error('{}: identical file in database, not added', sf.name)
 
 ### `delete`/`rm`
 def command_delete(db, args):
 	for hash in args.hash:
 		try:
 			db.delete(db.get(hash))
-		except database.FileDoesNotExistError:
-			print('{}: does not exist'.format(hash))
+		except common.FileDoesNotExistError:
+			error('{}: does not exist', hash)
 
 ### `exists`
 def command_exists(db, args):
@@ -32,7 +51,7 @@ def command_exists(db, args):
 		db.get(args.hash)
 
 		return 0
-	except (database.AmbiguousHashError, database.FileDoesNotExistError):
+	except (common.AmbiguousHashError, common.FileDoesNotExistError):
 		return 1
 
 ### `exists`
@@ -40,32 +59,31 @@ def command_find_hashes(db, args):
 	for hash in db.find_hashes(args.prefix):
 		print(hash)
 
+### `search`
+def command_search(db, args):
+	for result in db.search(' '.join(args.query), limit = args.limit):
+		show_file(db, result, args)
+
 ### `set`
 def command_set(db, args):
 	try:
 		f = db.get(args.hash)
-		f.set_metadata(args.key, args.value)
+		f.set_metadata(args.field, args.value)
 		db.save(f)
-	except database.AmbiguousHashError:
-		print('{}: ambiguous hash'.format(args.hash))
-	except database.FileDoesNotExistError:
-		print('{}: does not exist'.format(args.hash))
+	except common.AmbiguousHashError: error('{}: ambiguous hash', args.hash)
+	except common.FieldDoesNotExistError: error('field "{}" does not exist', args.field)
+	except common.FieldReadOnlyError: error('field "{}" is read only', args.field)
+	except common.FileDoesNotExistError: error('{}: does not exist', args.hash)
 
 ### `show`
 def command_show(db, args):
 	for hash in args.hash:
 		try:
 			f = db.get(hash)
-			print('{}:'.format(f.short_hash))
-			for key, value in f.metadata.items():
-				print('    {}: {}'.format(key, value))
+			show_file(db, f, args)
 
-		except database.AmbiguousHashError:
-			print('{}: ambiguous hash'.format(hash))
-		except database.FileDoesNotExistError:
-			print('{}: does not exist'.format(hash))
-
-		print()
+		except common.AmbiguousHashError: error('{}: ambiguous hash', hash)
+		except common.FileDoesNotExistError: error('{}: does not exist', hash)
 
 # From http://stackoverflow.com/a/13429281
 class SubcommandHelpFormatter(argparse.RawDescriptionHelpFormatter):
@@ -140,6 +158,32 @@ def main():
 	)
 
 	p = subparsers.add_parser(
+		'search',
+		help = 'Search files by metadata',
+	)
+	p.add_argument('query',
+		metavar = 'QUERY',
+		nargs = '+'
+	)
+	p.add_argument('-f', '--format',
+		help = 'Output format',
+		dest = 'format',
+		choices = OUTPUT_FORMATS,
+		default = 'short_hash',
+	)
+	p.add_argument('-l', '--long',
+		help = 'Show metadata (default no)',
+		dest = 'format',
+		action = 'store_const',
+		const = 'long'
+	)
+	p.add_argument('-n', '--limit',
+		help = 'Number of results to show',
+		type = int,
+		default = 10
+	)
+
+	p = subparsers.add_parser(
 		'set',
 		help = 'Set metadata for a given file',
 	)
@@ -147,9 +191,9 @@ def main():
 		help = 'Hash of file to change',
 		metavar = 'HASH',
 	)
-	p.add_argument('key',
-		help = 'Metadata key',
-		metavar = 'KEY',
+	p.add_argument('field',
+		help = 'Metadata field',
+		metavar = 'FIELD',
 	)
 	p.add_argument('value',
 		help = 'Metadata value',
@@ -164,6 +208,18 @@ def main():
 		help = 'Hashes of files to show',
 		metavar = 'HASH',
 		nargs = '+',
+	)
+	p.add_argument('-f', '--format',
+		help = 'Output format',
+		dest = 'format',
+		choices = OUTPUT_FORMATS,
+		default = 'long',
+	)
+	p.add_argument('-l', '--long',
+		help = 'Show metadata (default no)',
+		dest = 'format',
+		action = 'store_const',
+		const = 'long'
 	)
 
 	args = parser.parse_args()

@@ -1,12 +1,6 @@
-from . import config
+from . import config, common
 
 from whoosh import analysis, fields, index, qparser, query
-
-class KeyDoesNotExistError(Exception):
-	pass
-
-class FieldChangedError(Exception):
-	pass
 
 def _create_field_type(field_config):
 	return dict(
@@ -20,14 +14,14 @@ def _create_field_type(field_config):
 
 class SearchDatabase:
 	def __init__(self, base_path):
-		self.configured_fields = {key: _create_field_type(value) for key, value in config.conf['metadata'].items()}
+		self.configured_fields = {field: _create_field_type(value) for field, value in config.conf['metadata'].items()}
 
 		if index.exists_in(base_path):
 			self.index = index.open_dir(base_path)
 
 			for name, field in self.index.schema.items():
 				if name not in self.configured_fields or field != self.configured_fields[name]:
-					raise FieldChangedError(name)
+					raise common.FieldConfigChangedError(name)
 		else:
 			schema = fields.Schema()
 			for name, field in self.configured_fields.items():
@@ -49,6 +43,22 @@ class SearchDatabase:
 
 		return result
 
+	def parse_query(self, query):
+		parser = qparser.QueryParser('comments', self.index.schema)
+		parser.add_plugin(qparser.WildcardPlugin())
+		parser.replace_plugin(qparser.FieldsPlugin(expr=r"(?P<text>[\w-]+|[*]):"))
+
+		return parser.parse(query)
+
+	def search(self, query_text, limit):
+		q = self.parse_query(query_text)
+
+		with self.index.searcher() as searcher:
+			results = searcher.search(q, limit = limit)
+
+			for result in results:
+				yield dict(result)
+
 	def delete(self, f):
 		writer = self.index.writer()
 		writer.delete_by_term('hash', hash)
@@ -57,12 +67,12 @@ class SearchDatabase:
 	def save(self, f):
 		writer = self.index.writer()
 
-		for key in f.metadata:
-			if key not in self.index.schema.names():
-				if key not in self.configured_fields:
-					raise KeyDoesNotExistError(key)
+		for field in f.metadata:
+			if field not in self.index.schema.names():
+				if field not in self.configured_fields:
+					raise common.FieldDoesNotExistError(field)
 
-				writer.add_field(key, self.configured_fields[key])
+				writer.add_field(field, self.configured_fields[field])
 
 		writer.update_document(**f.metadata)
 		writer.commit()

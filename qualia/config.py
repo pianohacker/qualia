@@ -78,15 +78,19 @@ BASE = DictItem(
 	metadata = DictItem(
 		hash = DictItem(
 			type = FixedItem('id'),
+			read_only = FixedItem(True),
 		),
 		comments = DictItem(
-			type = FixedItem('text')
+			type = FixedItem('text'),
+			read_only = FixedItem(False),
 		),
 		original_filename = DictItem(
-			type = FixedItem('exact-text')
+			type = FixedItem('exact-text'),
+			read_only = FixedItem(False),
 		),
 		_others = DictItem(
-			type = Item(set(['exact-text', 'text', 'id', 'number', 'keyword', 'datetime']), 'text')
+			type = Item(set(['exact-text', 'text', 'id', 'number', 'keyword', 'datetime']), 'text'),
+			read_only = Item(False, bool),
 		),
 	),
 	database_path = Item(str, None),

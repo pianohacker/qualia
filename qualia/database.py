@@ -1,5 +1,3 @@
-from . import journal, search
-
 import codecs
 import datetime
 import glob
@@ -8,6 +6,9 @@ import itertools
 import os
 from os import path
 import shutil
+import stat
+
+from . import common, config, journal, search
 
 def get_default_path():
 	return path.expanduser('~/q')
@@ -24,21 +25,18 @@ class File:
 	def short_hash(self):
 		return self.db.get_shortest_hash(self.hash)
 
-	def set_metadata(self, key, value, source = 'user'):
-		self.metadata[key] = value
-		self.modifications.append((source, key, value))
+	def set_metadata(self, field, value, source = 'user'):
+		if field not in config.conf['metadata']:
+			raise common.FieldDoesNotExistError(field)
+
+		if field in self.metadata and config.conf['metadata'][field]['read-only']:
+			raise common.FieldReadOnlyError(field)
+
+		self.metadata[field] = value
+		self.modifications.append((source, field, value))
 	
 	def import_fs_metadata(self, filename):
 		self.set_metadata('original-filename', path.abspath(filename), 'auto')
-
-class AmbiguousHashError(Exception):
-	pass
-
-class FileDoesNotExistError(Exception):
-	pass
-
-class FileExistsError(Exception):
-	pass
 
 class Database:
 	def __init__(self, db_path):
@@ -67,7 +65,7 @@ class Database:
 		filename = self.get_filename_for_hash(hash)
 
 		if path.exists(filename):
-			raise FileExistsError(hash)
+			raise common.FileExistsError(hash)
 
 		self.journal.append(source, hash, 'create')
 
@@ -82,6 +80,11 @@ class Database:
 			# copy
 			shutil.copyfileobj(source_file, open(filename, 'wb'))
 
+		# This is apparently the required song and dance to get the current umask.
+		old_umask = os.umask(0)
+		os.umask(old_umask)
+
+		os.chmod(filename, (stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH) & ~old_umask)
 		self.searchdb.add(hash)
 
 		return File(self, hash, {})
@@ -107,15 +110,18 @@ class Database:
 
 		return hash[:baselen]
 
+	def get_filename(self, f):
+		return self.get_filename_for_hash(f.hash)
+
 	def get(self, short_hash):
 		result = self.find_hashes(short_hash)
 		hash, extra = next(result, None), next(result, None)
 
 		if hash is None:
-			raise FileDoesNotExistError(short_hash)
+			raise common.FileDoesNotExistError(short_hash)
 
 		if extra is not None:
-			raise AmbiguousHashError(short_hash)
+			raise common.AmbiguousHashError(short_hash)
 
 		return File(self, hash, self.searchdb.get(hash))
 
@@ -131,9 +137,13 @@ class Database:
 
 	def save(self, f):
 		t = datetime.datetime.now()
-		for source, key, value in f.modifications:
-			self.journal.append(source, f.hash, 'set', key, value, time = t)
+		for source, field, value in f.modifications:
+			self.journal.append(source, f.hash, 'set', field, value, time = t)
 
 		self.searchdb.save(f)
 
 		f.modifications = []
+
+	def search(self, query, limit = 10):
+		for result in self.searchdb.search(query, limit = limit):
+			yield File(self, result['hash'], result)
