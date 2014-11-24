@@ -17,6 +17,7 @@ class File:
 		self.db = db
 		self.hash = hash
 		self.metadata = metadata
+		self.metadata.setdefault('hash', hash)
 		self.modifications = []
 
 	@property
@@ -119,11 +120,12 @@ class Database:
 		return File(self, hash, self.searchdb.get(hash))
 
 	def delete(self, f, source = 'user'):
-		self.journal.append(source, hash, 'delete')
-		self.unlink(self.get_filename_for_hash(hash))
+		self.journal.append(source, f.hash, 'delete')
+		os.unlink(self.get_filename_for_hash(f.hash))
+		self.searchdb.delete(f)
 
 		try:
-			self.rmdir(self.get_directory_for_hash(hash))
+			self.rmdir(self.get_directory_for_hash(f.hash))
 		except OSError:
 			pass
 
@@ -132,7 +134,6 @@ class Database:
 		for source, key, value in f.modifications:
 			self.journal.append(source, f.hash, 'set', key, value, time = t)
 
-		for source, key, value in f.modifications:
-			self.searchdb.set(f.hash, key, value)
+		self.searchdb.save(f)
 
 		f.modifications = []

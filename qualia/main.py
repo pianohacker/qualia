@@ -1,5 +1,5 @@
 ## Imports
-from . import database
+from . import config, database
 
 import argparse
 import os
@@ -88,6 +88,11 @@ def main():
 		help = 'Database path'
 	)
 
+	parser.add_argument('--config',
+		help = 'Config file path',
+		default = config.get_default_path()
+	)
+
 	subparsers = parser.add_subparsers(
 		title = 'commands',
 		dest = 'command',
@@ -163,7 +168,9 @@ def main():
 
 	args = parser.parse_args()
 
-	db = database.Database(args.db)
+	config.load(args.config)
+
+	db = database.Database(args.db or config.conf['database-path'] or database.get_default_path())
 
 	# `args.command` should be limited to the defined subcommands, but there's not much risk here
 	# anyway.
