@@ -69,6 +69,8 @@ class Database:
 
 		self.journal.append(source, hash, 'create')
 
+		self.searchdb.add(hash)
+
 		if move:
 			try:
 				os.rename(source_file.name, filename)
@@ -85,7 +87,6 @@ class Database:
 		os.umask(old_umask)
 
 		os.chmod(filename, (stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH) & ~old_umask)
-		self.searchdb.add(hash)
 
 		return File(self, hash, {})
 

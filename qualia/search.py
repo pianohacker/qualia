@@ -31,7 +31,9 @@ class SearchDatabase:
 
 	def add(self, hash):
 		writer = self.index.writer()
-		writer.add_document(hash = hash)
+		# We use update_document, rather than add_document, so this function can be mostly
+		# idempotent
+		writer.update_document(hash = hash)
 		writer.commit()
 
 	def get(self, hash):

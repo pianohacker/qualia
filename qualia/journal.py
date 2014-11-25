@@ -36,5 +36,3 @@ class Journal:
 				VALUES(?, ?, ?, ?, ?)
 		''', (time or datetime.datetime.now(), source, file, op, (b'\t'.join(str(arg).encode('unicode-escape') for arg in args))))
 		self.db.commit()
-
-		return cur.lastrowid
