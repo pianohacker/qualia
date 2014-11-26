@@ -1,5 +1,5 @@
 ## Imports
-from . import common, config, database
+from . import common, config, conversion, database
 
 import argparse
 import os
@@ -31,7 +31,7 @@ def command_add(db, args):
 	for sf in args.file:
 		try:
 			f = db.add_file(sf, args.command == 'take')
-			f.import_fs_metadata(sf.name)
+			conversion.auto_add_metadata(f, sf.name)
 			db.save(f)
 			print('{}: {}'.format(sf.name, f.short_hash))
 		except common.FileExistsError:
@@ -68,12 +68,13 @@ def command_search(db, args):
 def command_set(db, args):
 	try:
 		f = db.get(args.hash)
-		f.set_metadata(args.field, args.value)
+		f.set_metadata(args.field, conversion.parse_metadata(args.field, args.value))
 		db.save(f)
 	except common.AmbiguousHashError: error('{}: ambiguous hash', args.hash)
 	except common.FieldDoesNotExistError: error('field "{}" does not exist', args.field)
 	except common.FieldReadOnlyError: error('field "{}" is read only', args.field)
 	except common.FileDoesNotExistError: error('{}: does not exist', args.hash)
+	except common.InvalidFieldValue: error('invalid value "{}" for field', args.value, args.field)
 
 ### `show`
 def command_show(db, args):
@@ -225,8 +226,12 @@ def main():
 	args = parser.parse_args()
 
 	config.load(args.config)
-
-	db = database.Database(args.db or config.conf['database-path'] or database.get_default_path())
+	print(__import__('yaml').dump(config.conf))
+	db_path = args.db or config.conf['database-path'] or database.get_default_path()
+	config.load(os.path.join(db_path, 'config.yaml'))
+	print(__import__('yaml').dump(config.conf))
+	sys.exit(0)
+	db = database.Database(db_path)
 
 	# `args.command` should be limited to the defined subcommands, but there's not much risk here
 	# anyway.

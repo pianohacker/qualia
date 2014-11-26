@@ -15,8 +15,8 @@ class Item:
 		self.type = type
 		self.default = default
 
-	def merge(self, value):
-		return self.default if value is None else value
+	def merge(self, start, value):
+		return (self.default if start is None else start) if value is None else value
 	
 	def verify(self, path, value):
 		if value is None: return
@@ -32,16 +32,17 @@ class DictItem(Item):
 		super().__init__(dict, {key.replace('_', '-'): value for key, value in kwargs.items()})
 		self.constrained_keys = set(constrained_keys)
 
-	def merge(self, value):
+	def merge(self, start, value):
+		start = start or {}
+		result = dict(start)
 		value = value or {}
-		result = {}
 
 		for key in self.default:
 			if key == '-others': continue
-			result[key] = self.default[key].merge(value.get(key))
+			result[key] = self.default[key].merge(start.get(key), value.get(key))
 		
 		for key in set(value) - set(self.default):
-			result[key] = self.default['-others'].merge(value[key])
+			result[key] = self.default['-others'].merge(start.get(key), value[key])
 
 		return result
 
@@ -67,7 +68,7 @@ class FixedItem(Item):
 	def __init__(self, value):
 		super().__init__(type(value), value)
 
-	def merge(self, value):
+	def merge(self, start, value):
 		return self.default
 
 	def verify(self, path, value):
@@ -90,10 +91,10 @@ BASE = DictItem(
 		),
 		_others = DictItem(
 			type = Item(set(['exact-text', 'text', 'id', 'number', 'keyword', 'datetime']), 'text'),
-			read_only = Item(False, bool),
+			read_only = Item(bool, False),
 		),
 	),
-	database_path = Item(str, None),
+	database_path = Item(str, None)
 )
 
 conf = {}
@@ -105,4 +106,4 @@ def load(filename):
 		user_config = {}
 
 	BASE.verify(None, user_config)
-	conf.update(BASE.merge(user_config))
+	conf.update(BASE.merge(conf, user_config))

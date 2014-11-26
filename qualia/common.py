@@ -15,3 +15,6 @@ class FileExistsError(Exception):
 
 class FieldDoesNotExistError(Exception):
 	pass
+
+class InvalidFieldValue(Exception):
+	pass

@@ -34,9 +34,6 @@ class File:
 
 		self.metadata[field] = value
 		self.modifications.append((source, field, value))
-	
-	def import_fs_metadata(self, filename):
-		self.set_metadata('original-filename', path.abspath(filename), 'auto')
 
 class Database:
 	def __init__(self, db_path):
