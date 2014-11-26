@@ -1,4 +1,6 @@
+import base64
 import datetime
+import pickle
 import sqlite3
 
 class Journal:
@@ -34,5 +36,5 @@ class Journal:
 			INSERT INTO
 				journal(timestamp, source, file, op, extra)
 				VALUES(?, ?, ?, ?, ?)
-		''', (time or datetime.datetime.now(), source, file, op, (b'\t'.join(str(arg).encode('unicode-escape') for arg in args))))
+		''', (time or datetime.datetime.now(), source, file, op, pickle.dumps(args)))
 		self.db.commit()
