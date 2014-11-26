@@ -226,11 +226,8 @@ def main():
 	args = parser.parse_args()
 
 	config.load(args.config)
-	print(__import__('yaml').dump(config.conf))
 	db_path = args.db or config.conf['database-path'] or database.get_default_path()
 	config.load(os.path.join(db_path, 'config.yaml'))
-	print(__import__('yaml').dump(config.conf))
-	sys.exit(0)
 	db = database.Database(db_path)
 
 	# `args.command` should be limited to the defined subcommands, but there's not much risk here

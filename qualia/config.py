@@ -89,6 +89,18 @@ BASE = DictItem(
 			type = FixedItem('exact-text'),
 			read_only = FixedItem(False),
 		),
+		imported_at = DictItem(
+			type = FixedItem('datetime'),
+			read_only = FixedItem(False),
+		),
+		modified_at = DictItem(
+			type = FixedItem('datetime'),
+			read_only = FixedItem(False),
+		),
+		mime_type = DictItem(
+			type = FixedItem('exact-text'),
+			read_only = FixedItem(False),
+		),
 		_others = DictItem(
 			type = Item(set(['exact-text', 'text', 'id', 'number', 'keyword', 'datetime']), 'text'),
 			read_only = Item(bool, False),
