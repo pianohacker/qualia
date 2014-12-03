@@ -90,6 +90,19 @@ class Database:
 	def add(self, source_filename, *args, **kwargs):
 		return self.add_file(open(source_filename, 'rb'), *args, **kwargs)
 
+	def restore_metadata(self, f, only_auto = True):
+		modifications = {}
+
+		for transaction in self.journal.get_transactions(f.hash, 'set'):
+			if only_auto and transaction['source'] == 'auto': continue
+
+			field, value = transaction['extra']
+
+			modifications[field] = transaction['source'], field, value
+
+		for source, field, value in modifications.items():
+			f.set_metadata(field, value, source = source)
+
 	def find_hashes(self, prefix):
 		# Note: this is a bit of a hack. Here be dragons.
 		# TODO: Remove dragons

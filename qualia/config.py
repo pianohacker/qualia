@@ -101,6 +101,10 @@ BASE = DictItem(
 			type = FixedItem('exact-text'),
 			read_only = FixedItem(False),
 		),
+		tags = DictItem(
+			type = FixedItem('keyword'),
+			read_only = FixedItem(False),
+		),
 		_others = DictItem(
 			type = Item(set(['exact-text', 'text', 'id', 'number', 'keyword', 'datetime']), 'text'),
 			read_only = Item(bool, False),

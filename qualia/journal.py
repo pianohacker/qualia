@@ -9,6 +9,7 @@ class Journal:
 			filename,
 			detect_types = sqlite3.PARSE_DECLTYPES
 		)
+		self.db.row_factory = sqlite3.Row
 		self.upgrade_if_needed()
 		self.f = open(filename, 'ab')
 
@@ -31,10 +32,22 @@ class Journal:
 	
 	def append(self, source, file, op, *args, time = None):
 		cur = self.db.cursor()
-
 		cur.execute('''
 			INSERT INTO
 				journal(timestamp, source, file, op, extra)
 				VALUES(?, ?, ?, ?, ?)
 		''', (time or datetime.datetime.now(), source, file, op, pickle.dumps(args)))
 		self.db.commit()
+
+	def get_transactions(self, file, op):
+		cur = self.db.cursor()
+		cur.execute('''
+			SELECT
+				*
+				FROM journal
+				WHERE file = ? AND op = ?
+				ORDER BY serial
+		''')
+
+		for row in cur.fetchall():
+			yield dict(row, extra = pickle.loads(row['extra']))

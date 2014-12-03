@@ -32,6 +32,7 @@ def command_add(db, args):
 		try:
 			f = db.add_file(sf, args.command == 'take')
 			conversion.auto_add_metadata(f, sf.name)
+			if args.restore: db.restore_metadata(f)
 			db.save(f)
 			print('{}: {}'.format(sf.name, f.short_hash))
 		except common.FileExistsError:
@@ -122,6 +123,10 @@ def main():
 		'add',
 		aliases = ['take'],
 		help = 'add an external file to the DB (use \'take\' to move instead of copying)',
+	)
+	p.add_argument('--restore',
+		action = 'store_true',
+		help = 'Restore previous metadata for this file',
 	)
 	p.add_argument('file',
 		help = 'External file(s) to add',
