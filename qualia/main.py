@@ -3,6 +3,7 @@ from . import common, config, conversion, database
 
 import argparse
 import os
+import tempfile
 import shutil
 import sys
 
@@ -18,7 +19,7 @@ def show_file(db, f, args):
 	elif args.format == 'long':
 		print('{}:'.format(f.short_hash))
 		for field in sorted(f.metadata.keys()):
-			print('    {}: {}'.format(field, f.metadata[field]))
+			print('    {}: {}'.format(field, conversion.format_metadata(field, f.metadata[field])))
 		print()
 	elif args.format == 'short_hash':
 		print(f.short_hash)
@@ -45,6 +46,35 @@ def command_delete(db, args):
 			db.delete(db.get(hash))
 		except common.FileDoesNotExistError:
 			error('{}: does not exist', hash)
+
+### `edit`
+def command_edit(db, args):
+	try:
+		f = db.get(args.hash)
+
+		editable = conversion.format_editable_metadata(f)
+
+		metadata_f = tempfile.NamedTemporaryFile(mode = 'w+t', encoding = 'utf-8')
+		metadata_f.write(editable)
+		metadata_f.flush()
+
+		editor = os.environ.get('EDITOR', os.environ.get('VISUAL', 'vi'))
+
+		if os.system(editor + ' ' + metadata_f.name) != 0:
+			error('could not run {}; please check your settings for $EDITOR or $VISUAL', editor)
+
+		metadata_f.seek(0)
+		editable = metadata_f.read()
+		metadata_f.close()
+
+		conversion.parse_editable_metadata(f, editable)
+
+		db.save(f)
+	except common.AmbiguousHashError: error('{}: ambiguous hash', args.hash)
+	except common.FieldDoesNotExistError: error('field "{}" does not exist', args.field)
+	except common.FieldReadOnlyError: error('field "{}" is read only', args.field)
+	except common.FileDoesNotExistError: error('{}: does not exist', args.hash)
+	except common.InvalidFieldValue: error('invalid value "{}" for field', args.value, args.field)
 
 ### `exists`
 def command_exists(db, args):
@@ -145,6 +175,16 @@ def main():
 		metavar = 'HASH',
 		nargs = '+',
 	)
+
+	p = subparsers.add_parser(
+		'edit',
+		help = 'Edit all of the metadata of a given file',
+	)
+	p.add_argument('hash',
+		help = 'hash of file to edit',
+		metavar = 'HASH',
+	)
+
 	p = subparsers.add_parser(
 		'exists',
 		help = 'Check whether a file exists and set exit status accordingly',

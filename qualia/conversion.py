@@ -1,3 +1,4 @@
+##Imports
 from . import common, config
 
 import datetime
@@ -20,8 +21,6 @@ def _parse_datetime(field_conf, text_value):
 def _parse_exact_text(field_conf, text_value):
 	return text_value
 
-_parse_id = _parse_exact_text
-
 def _parse_number(field_conf, text_value):
 	try:
 		return float(text_value)
@@ -38,8 +37,43 @@ def parse_metadata(field, text_value):
 
 	return globals().get('_parse_' + field_conf['type'].replace('-', '_'), _parse_exact_text)(field_conf, text_value)
 
-def show_metadata(field, value):
+def parse_editable_metadata(f, editable):
 	pass
+
+def _format_exact_text(field_conf, value):
+	return str(value)
+
+def format_metadata(field, value):
+	field_conf = config.conf['metadata'][field]
+
+	return globals().get('_format_' + field_conf['type'].replace('-', '_'), _format_exact_text)(field_conf, value)
+
+def format_editable_metadata(f):
+	result = []
+	result.append('# qualia: editing metadata for file {}'.format(f.short_hash))
+	result.append('#')
+	result.append('# read-only fields:'.format(f.short_hash))
+
+	read_only_fields = []
+	editable_fields = []
+
+	for field, value in sorted(f.metadata.items()):
+		field_conf = config.conf['metadata'][field]
+
+		text = '{}: {}'.format(field, format_metadata(field, value))
+
+		if field_conf['read-only']:
+			read_only_fields.append(text)
+		else:
+			editable_fields.append(text)
+
+	result.extend(('#     ' + line) for line in read_only_fields)
+
+	result.append('')
+
+	result.extend(editable_fields)
+
+	return '\n'.join(result)
 
 def _auto_add_fs(f, original_filename):
 	f.set_metadata('original-filename', path.abspath(original_filename), 'auto')
