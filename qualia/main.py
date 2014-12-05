@@ -36,16 +36,14 @@ def command_add(db, args):
 			if args.restore: db.restore_metadata(f)
 			db.save(f)
 			print('{}: {}'.format(sf.name, f.short_hash))
-		except common.FileExistsError:
-			error('{}: identical file in database, not added', sf.name)
+		except common.FileExistsError: error('{}: identical file in database, not added', sf.name)
 
 ### `delete`/`rm`
 def command_delete(db, args):
 	for hash in args.hash:
 		try:
 			db.delete(db.get(hash))
-		except common.FileDoesNotExistError:
-			error('{}: does not exist', hash)
+		except common.FileDoesNotExistError: error('{}: does not exist', hash)
 
 ### `edit`
 def command_edit(db, args):
@@ -67,14 +65,18 @@ def command_edit(db, args):
 		editable = metadata_f.read()
 		metadata_f.close()
 
-		conversion.parse_editable_metadata(f, editable)
+		modifications = conversion.parse_editable_metadata(f, editable)
 
-		db.save(f)
+		if args.verbose:
+			for field, value in modifications:
+				print('changing {} to {}'.format(field, conversion.format_metadata(field, value)))
+
+		if not args.dry_run: db.save(f)
 	except common.AmbiguousHashError: error('{}: ambiguous hash', args.hash)
-	except common.FieldDoesNotExistError: error('field "{}" does not exist', args.field)
-	except common.FieldReadOnlyError: error('field "{}" is read only', args.field)
-	except common.FileDoesNotExistError: error('{}: does not exist', args.hash)
-	except common.InvalidFieldValue: error('invalid value "{}" for field', args.value, args.field)
+	except common.FieldDoesNotExistError as e: error('field "{}" does not exist', e.args[0])
+	except common.FieldReadOnlyError as e: error('field "{}" is read only', e.args[0])
+	except common.FileDoesNotExistError as e: error('{}: does not exist', e.args[0])
+	except common.InvalidFieldValue as e: error('invalid value "{}" for field {}', e.args[1], e.args[0])
 
 ### `exists`
 def command_exists(db, args):
@@ -101,11 +103,15 @@ def command_set(db, args):
 		f = db.get(args.hash)
 		f.set_metadata(args.field, conversion.parse_metadata(args.field, args.value))
 		db.save(f)
+
+		return 0
 	except common.AmbiguousHashError: error('{}: ambiguous hash', args.hash)
 	except common.FieldDoesNotExistError: error('field "{}" does not exist', args.field)
 	except common.FieldReadOnlyError: error('field "{}" is read only', args.field)
 	except common.FileDoesNotExistError: error('{}: does not exist', args.hash)
 	except common.InvalidFieldValue: error('invalid value "{}" for field', args.value, args.field)
+
+	return 1
 
 ### `show`
 def command_show(db, args):
@@ -183,6 +189,14 @@ def main():
 	p.add_argument('hash',
 		help = 'hash of file to edit',
 		metavar = 'HASH',
+	)
+	p.add_argument('-n', '--dry-run',
+		action = 'store_true',
+		help = 'Don\'t save edits to database',
+	)
+	p.add_argument('-v', '--verbose',
+		action = 'store_true',
+		help = 'Show changes to metadata',
 	)
 
 	p = subparsers.add_parser(
@@ -273,7 +287,12 @@ def main():
 	config.load(args.config)
 	db_path = args.db or config.conf['database-path'] or database.get_default_path()
 	config.load(os.path.join(db_path, 'config.yaml'))
-	db = database.Database(db_path)
+
+	try:
+		db = database.Database(db_path)
+	except common.FieldConfigChangedError as e:
+		error('Configuration for field `{}` changed or removed after adding it to files', e.args[0])
+		sys.exit(1)
 
 	# `args.command` should be limited to the defined subcommands, but there's not much risk here
 	# anyway.

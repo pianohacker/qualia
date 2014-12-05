@@ -85,15 +85,15 @@ BASE = DictItem(
 			type = FixedItem('text'),
 			read_only = FixedItem(False),
 		),
+		file_modified_at = DictItem(
+			type = FixedItem('datetime'),
+			read_only = FixedItem(False),
+		),
 		original_filename = DictItem(
 			type = FixedItem('exact-text'),
 			read_only = FixedItem(False),
 		),
 		imported_at = DictItem(
-			type = FixedItem('datetime'),
-			read_only = FixedItem(False),
-		),
-		modified_at = DictItem(
 			type = FixedItem('datetime'),
 			read_only = FixedItem(False),
 		),

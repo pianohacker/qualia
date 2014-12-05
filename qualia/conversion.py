@@ -1,3 +1,6 @@
+# This file contains a number of utility functions for converting metadata to/from qualia's internal
+# formats, text entered by the user or filesystem/embedded metadata.
+#
 ##Imports
 from . import common, config
 
@@ -5,41 +8,88 @@ import datetime
 import os
 from os import path
 import parsedatetime
+import re
 import stat
 import time
 
-def _parse_datetime(field_conf, text_value):
+## Parsing
+# The functions below all are used to parse metadata entered by the user. `parse_metadata` is the
+# entry point, and takes both the name and value of the field so it can look up the correct parser
+# for the field's format.
+#
+# This parser uses parsedatetime, and can understand a number of date formats including
+# (conveniently) the default string representation of datetime objects, English representations like
+# 'tomorrow at ten', etc.
+def _parse_datetime(field, field_conf, text_value):
+	# First, try to parse the exact format we emit, as `parsedatetime` does not correctly handle it.
+	exact_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.(\d{6})', text_value)
+	if exact_match:
+		try:
+			base_dt = datetime.datetime.strptime(exact_match.group(1), '%Y-%m-%d %H:%M:%S')
+		except ValueError:
+			raise common.InvalidFieldValue(field, text_value)
+
+		return base_dt  + datetime.timedelta(microseconds = int(exact_match.group(2)))
+
+	# Then, try to parse a human date/time.
 	cal = parsedatetime.Calendar()
 	result = cal.parse(text_value)
 
 	if not result:
 		raise common.InvalidFieldValue(field, text_value)
-		return
 
 	return datetime.datetime.fromtimestamp(time.mktime(result[0]))
 
-def _parse_exact_text(field_conf, text_value):
-	return text_value
+# Besides parsing `exact-text` fields, this is also the fallback for any field type without a
+# defined parser.
+def _parse_exact_text(field, field_conf, text_value):
+	return text_value.strip()
 
-def _parse_number(field_conf, text_value):
+def _parse_number(field, field_conf, text_value):
 	try:
 		return float(text_value)
 	except ValueError:
 		raise common.InvalidFieldValue(field, text_value)
 
-def _parse_text(field_conf, text_value):
-	return text_value.strip()
-
-_parse_keyword = _parse_text
-
 def parse_metadata(field, text_value):
 	field_conf = config.conf['metadata'][field]
 
-	return globals().get('_parse_' + field_conf['type'].replace('-', '_'), _parse_exact_text)(field_conf, text_value)
+	return globals().get('_parse_' + field_conf['type'].replace('-', '_'), _parse_exact_text)(field, field_conf, text_value)
 
+# This function is used for `qualia edit`, and takes any changes made to the textual version of the
+# metadata and applies them to the given file.
 def parse_editable_metadata(f, editable):
-	pass
+	modifications = []
 
+	for raw_line in editable.split('\n'):
+		line = ''
+		chars = iter(raw_line)
+		try:
+			while True:
+				c = next(chars)
+				if c == '\\':
+					c = next(chars)
+				elif c == '#':
+					break
+
+				line += c
+		except StopIteration: pass
+
+		if re.match(r'^\s*$', line): continue
+
+		field, text_value = line.split(':', 1)
+		value = parse_metadata(field, text_value[1:])
+
+		if value != f.metadata[field]:
+			modifications.append((field, value))
+			f.set_metadata(field, value)
+
+	return modifications
+
+## Formatting
+# These functions follow the same format as the implementations for `parse_metadata`, though there
+# are no specialized formatters yet. The only constraint on these formatters is that the matching
+# parser for their field type should be able to parse their output.
 def _format_exact_text(field_conf, value):
 	return str(value)
 
@@ -60,7 +110,7 @@ def format_editable_metadata(f):
 	for field, value in sorted(f.metadata.items()):
 		field_conf = config.conf['metadata'][field]
 
-		text = '{}: {}'.format(field, format_metadata(field, value))
+		text = '{}: {}'.format(field, re.sub(r'(\\|#)', r'\\\1', format_metadata(field, value)))
 
 		if field_conf['read-only']:
 			read_only_fields.append(text)
@@ -75,13 +125,6 @@ def format_editable_metadata(f):
 
 	return '\n'.join(result)
 
-def _auto_add_fs(f, original_filename):
-	f.set_metadata('original-filename', path.abspath(original_filename), 'auto')
-
-	s = os.stat(original_filename)
-
-	f.set_metadata('modified-at', datetime.datetime.fromtimestamp(s.st_mtime), 'auto')
-
 try:
 	import magic
 	magic_db = magic.open(magic.SYMLINK | magic.COMPRESS | magic.MIME_TYPE)
@@ -94,7 +137,7 @@ def _auto_add_fs(f, original_filename):
 
 	s = os.stat(original_filename)
 
-	f.set_metadata('modified-at', datetime.datetime.fromtimestamp(s.st_mtime), 'auto')
+	f.set_metadata('file-modified-at', datetime.datetime.fromtimestamp(s.st_mtime), 'auto')
 
 def _auto_add_magic(f, original_filename):
 	if magic_db is None: return
