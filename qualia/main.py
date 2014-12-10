@@ -45,6 +45,11 @@ def command_delete(db, args):
 			db.delete(db.get(hash))
 		except common.FileDoesNotExistError: error('{}: does not exist', hash)
 
+### `dump-metadata`
+def command_dump_metadata(db, args):
+	for f in db.all():
+		print(conversion.format_yaml_metadata(f))
+
 ### `edit`
 def command_edit(db, args):
 	try:
@@ -180,6 +185,11 @@ def main():
 		help = 'Hashes of file(s) to delete',
 		metavar = 'HASH',
 		nargs = '+',
+	)
+
+	p = subparsers.add_parser(
+		'dump-metadata',
+		help = 'Dump metadata for all files in YAML format',
 	)
 
 	p = subparsers.add_parser(

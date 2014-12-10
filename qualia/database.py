@@ -35,6 +35,9 @@ class File:
 		self.metadata[field] = value
 		self.modifications.append((source, field, value))
 
+	def __repr__(self):
+		return 'qualia.database.File(..., {!r}, {{...}})'.format(self.hash)
+
 class Database:
 	def __init__(self, db_path):
 		self.db_path = db_path
@@ -123,6 +126,11 @@ class Database:
 
 	def get_filename(self, f):
 		return self.get_filename_for_hash(f.hash)
+
+	def all(self):
+		for dir in sorted(os.listdir(path.join(self.db_path, 'files'))):
+			for hash in sorted(os.listdir(path.join(self.db_path, 'files', dir))):
+				yield File(self, hash, self.searchdb.get(hash))
 
 	def get(self, short_hash):
 		result = self.find_hashes(short_hash)

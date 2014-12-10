@@ -10,7 +10,9 @@ from os import path
 import parsedatetime
 import re
 import stat
+import textwrap
 import time
+import yaml
 
 ## Parsing
 # The functions below all are used to parse metadata entered by the user. `parse_metadata` is the
@@ -125,6 +127,15 @@ def format_editable_metadata(f):
 
 	return '\n'.join(result)
 
+def format_yaml_metadata(f):
+	return f.hash + ':\n' + textwrap.indent(
+		yaml.dump(
+			{key: value for key, value in f.metadata.items() if key != 'hash'},
+			default_flow_style = False
+		),
+		'  '
+	)
+
 try:
 	import magic
 	magic_db = magic.open(magic.SYMLINK | magic.COMPRESS | magic.MIME_TYPE)
@@ -133,7 +144,7 @@ except ImportError:
 	magic_db = None
 
 def _auto_add_fs(f, original_filename):
-	f.set_metadata('original-filename', path.abspath(original_filename), 'auto')
+	f.set_metadata('filename', path.abspath(original_filename), 'auto')
 
 	s = os.stat(original_filename)
 

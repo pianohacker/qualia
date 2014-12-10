@@ -89,7 +89,7 @@ BASE = DictItem(
 			type = FixedItem('datetime'),
 			read_only = FixedItem(False),
 		),
-		original_filename = DictItem(
+		filename = DictItem(
 			type = FixedItem('exact-text'),
 			read_only = FixedItem(False),
 		),
