@@ -145,7 +145,7 @@ def main():
 		formatter_class = SubcommandHelpFormatter,
 	)
 
-	parser.add_argument('--db',
+	parser.add_argument('--db-path', '-d',
 		help = 'Database path'
 	)
 
@@ -295,7 +295,7 @@ def main():
 	args = parser.parse_args()
 
 	config.load(args.config)
-	db_path = args.db or config.conf['database-path'] or database.get_default_path()
+	db_path = args.db_path or config.conf['database-path'] or database.get_default_path()
 	config.load(os.path.join(db_path, 'config.yaml'))
 
 	try:
