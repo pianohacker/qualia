@@ -10,6 +10,8 @@ import stat
 
 from . import common, config, journal, search
 
+VERSION = 1
+
 def get_default_path():
 	return path.expanduser('~/q')
 
@@ -26,10 +28,10 @@ class File:
 		return self.db.get_shortest_hash(self.hash)
 
 	def set_metadata(self, field, value, source = 'user'):
-		if field not in config.conf['metadata']:
+		if field not in self.db.state['metadata']:
 			raise common.FieldDoesNotExistError(field)
 
-		if field in self.metadata and config.conf['metadata'][field]['read-only']:
+		if field in self.metadata and self.db.state['metadata'][field]['read-only']:
 			raise common.FieldReadOnlyError(field)
 
 		self.metadata[field] = value
@@ -42,8 +44,19 @@ class Database:
 	def __init__(self, db_path):
 		self.db_path = db_path
 		self.init_if_needed()
+		self.state = {}
+		config.load(path.join(self.db_path, 'db_state.yaml'), self.state, config.DB_STATE_BASE)
+
+		if self.state['version'] is None:
+			self.state['version'] = VERSION
+		elif self.state['version'] != VERSION:
+			raise RuntimeError('Cannot open database of version {} (only support version {})'.format(self.state['version'], VERSION))
+
 		self.journal = journal.Journal(path.join(self.db_path, 'journal'))
-		self.searchdb = search.SearchDatabase(path.join(self.db_path, 'search'))
+		self.searchdb = search.SearchDatabase(self, path.join(self.db_path, 'search'))
+
+	def close(self):
+		config.save(os.path.join(self.db_path, 'db_state.yaml'), self.state, config.DB_STATE_BASE)
 
 	def init_if_needed(self):
 		if not path.exists(self.db_path):

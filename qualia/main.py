@@ -9,7 +9,7 @@ import sys
 
 ## Utility functions
 def error(message, *args):
-	print('qualia:', message.format(*args), file = sys.stderr)
+	print(message.format(*args), file = sys.stderr)
 
 def show_file(db, f, args):
 	if args.format == 'filename':
@@ -19,7 +19,7 @@ def show_file(db, f, args):
 	elif args.format == 'long':
 		print('{}:'.format(f.short_hash))
 		for field in sorted(f.metadata.keys()):
-			print('    {}: {}'.format(field, conversion.format_metadata(field, f.metadata[field])))
+			print('    {}: {}'.format(field, conversion.format_metadata(f, field, f.metadata[field])))
 		print()
 	elif args.format == 'short_hash':
 		print(f.short_hash)
@@ -74,7 +74,7 @@ def command_edit(db, args):
 
 		if args.verbose:
 			for field, value in modifications:
-				print('changing {} to {}'.format(field, conversion.format_metadata(field, value)))
+				print('changing {} to {}'.format(field, conversion.format_metadata(f, field, value)))
 
 		if not args.dry_run: db.save(f)
 	except common.AmbiguousHashError: error('{}: ambiguous hash', args.hash)
@@ -92,7 +92,12 @@ def command_exists(db, args):
 	except (common.AmbiguousHashError, common.FileDoesNotExistError):
 		return 1
 
-### `exists`
+### `field list`
+def subcommand_field_list(db, args):
+	for field in sorted(db.state['metadata']):
+		print(field)
+
+### `find-hashes`
 def command_find_hashes(db, args):
 	for hash in db.find_hashes(args.prefix):
 		print(hash)
@@ -106,7 +111,7 @@ def command_search(db, args):
 def command_set(db, args):
 	try:
 		f = db.get(args.hash)
-		f.set_metadata(args.field, conversion.parse_metadata(args.field, args.value))
+		f.set_metadata(args.field, conversion.parse_metadata(f, args.field, args.value))
 		db.save(f)
 
 		return 0
@@ -219,6 +224,22 @@ def main():
 	)
 
 	p = subparsers.add_parser(
+		'field',
+		help = 'Change available fields',
+	)
+
+	field_subparsers = p.add_subparsers(
+		title = 'subcommands',
+		dest = 'subcommand',
+		metavar = '<subcommand>',
+	)
+
+	fp = field_subparsers.add_parser(
+		'list',
+		help = 'List available fields',
+	)
+
+	p = subparsers.add_parser(
 		'find-hashes',
 		help = 'Print all hashes starting with PREFIX',
 	)
@@ -294,9 +315,13 @@ def main():
 
 	args = parser.parse_args()
 
-	config.load(args.config)
-	db_path = args.db_path or config.conf['database-path'] or database.get_default_path()
-	config.load(os.path.join(db_path, 'config.yaml'))
+	try:
+		config.load(args.config, config.conf, config.CONF_BASE)
+		db_path = args.db_path or config.conf['database-path'] or database.get_default_path()
+		config.load(os.path.join(db_path, 'config.yaml'), config.conf, config.CONF_BASE)
+	except config.ConstrainedError as e:
+		error('error in configuration file: {}', ('{}: {}'.format(*e.args)) if e.args[0] else e.args[1])
+		sys.exit(1)
 
 	try:
 		db = database.Database(db_path)
@@ -306,4 +331,10 @@ def main():
 
 	# `args.command` should be limited to the defined subcommands, but there's not much risk here
 	# anyway.
-	sys.exit(globals()['command_' + args.command.replace('-', '_')](db, args) or 0)
+	if args.subcommand:
+		return_code = globals()['subcommand_' + (args.command + '-' + args.subcommand).replace('-', '_')](db, args) or 0
+	else:
+		return_code = globals()['command_' + args.command.replace('-', '_')](db, args) or 0
+	db.close()
+
+	sys.exit(return_code)
