@@ -12,6 +12,7 @@ class Journal:
 		self.db.row_factory = sqlite3.Row
 		self.upgrade_if_needed()
 		self.f = open(filename, 'ab')
+		self.has_changes = False
 
 	def upgrade_if_needed(self):
 		version = self.db.execute('PRAGMA user_version').fetchone()[0]
@@ -28,7 +29,16 @@ class Journal:
 				);
 			""")
 
-			self.db.execute("PRAGMA user_version = 1")
+		if version < 2:
+			self.db.executescript("""
+				CREATE TABLE checkpoints (
+					checkpoint_id INTEGER PRIMARY KEY,
+					timestamp TIMESTAMP,
+					serial INTEGER
+				);
+			""")
+
+		self.db.execute("PRAGMA user_version = 2")
 	
 	def append(self, source, file, op, *args, time = None):
 		cur = self.db.cursor()
@@ -36,8 +46,11 @@ class Journal:
 			INSERT INTO
 				journal(timestamp, source, file, op, extra)
 				VALUES(?, ?, ?, ?, ?)
-		''', (time or datetime.datetime.now(), source, file, op, pickle.dumps(args)))
+			''',
+			(time or datetime.datetime.now(), source, file, op, pickle.dumps(args))
+		)
 		self.db.commit()
+		self.has_changes = True
 
 	def get_transactions(self, file, op):
 		cur = self.db.cursor()
@@ -47,7 +60,60 @@ class Journal:
 				FROM journal
 				WHERE file = ? AND op = ?
 				ORDER BY serial
-		''')
+			''',
+			(file, op)
+		)
 
 		for row in cur.fetchall():
 			yield dict(row, extra = pickle.loads(row['extra']))
+
+	def checkpoint(self, time = None):
+		if not self.has_changes: return None
+
+		cur = self.db.cursor()
+		cur.execute('''
+			INSERT INTO
+				checkpoints(timestamp, serial)
+				VALUES(?, (SELECT MAX(serial) FROM journal))
+			''',
+			(time or datetime.datetime.now(),)
+		)
+		self.db.commit()
+
+		return cur.lastrowid
+
+	def get_checkpoint(self, checkpoint_id):
+		checkpoint = self.db.execute('''
+			SELECT
+				*
+				FROM checkpoints
+				WHERE checkpoint_id = ?
+			''',
+			(checkpoint_id,)
+		).fetchone()
+		if not checkpoint: return None
+
+		last_checkpoint = self.db.execute('''
+			SELECT
+				serial
+				FROM checkpoints
+				WHERE checkpoint_id < ?
+				ORDER BY checkpoint_id DESC
+				LIMIT 1
+			''',
+			(checkpoint_id,)
+		).fetchone()
+
+		checkpoint = dict(checkpoint)
+		checkpoint.update(
+			transactions = self.db.execute('''
+				SELECT *
+					FROM journal
+					WHERE serial > ? AND serial <= ?
+					ORDER BY serial
+				''',
+				(last_checkpoint[0] if last_checkpoint else 0, checkpoint['serial'])
+			).fetchall()
+		)
+
+		return checkpoint

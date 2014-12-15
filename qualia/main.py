@@ -2,12 +2,24 @@
 from . import common, config, conversion, database
 
 import argparse
+import functools
 import os
 import tempfile
 import shutil
 import sys
 
 ## Utility functions
+def auto_checkpoint(func):
+	@functools.wraps(func)
+	def wrapper(db, args):
+		result = func(db, args) or 0
+
+		if result == 0: db.checkpoint()
+
+		return result
+
+	return wrapper
+
 def error(message, *args):
 	print(message.format(*args), file = sys.stderr)
 
@@ -28,6 +40,7 @@ OUTPUT_FORMATS = ['filename', 'short_hash', 'hash', 'long']
 
 ## Commands
 ### `add`/`take`
+@auto_checkpoint
 def command_add(db, args):
 	for sf in args.file:
 		try:
@@ -39,6 +52,7 @@ def command_add(db, args):
 		except common.FileExistsError: error('{}: identical file in database, not added', sf.name)
 
 ### `delete`/`rm`
+@auto_checkpoint
 def command_delete(db, args):
 	for hash in args.hash:
 		try:
@@ -51,6 +65,7 @@ def command_dump_metadata(db, args):
 		print(conversion.format_yaml_metadata(f))
 
 ### `edit`
+@auto_checkpoint
 def command_edit(db, args):
 	try:
 		f = db.get(args.hash)
@@ -108,6 +123,7 @@ def command_search(db, args):
 		show_file(db, result, args)
 
 ### `set`
+@auto_checkpoint
 def command_set(db, args):
 	try:
 		f = db.get(args.hash)
@@ -329,9 +345,11 @@ def main():
 		error('Configuration for field `{}` changed or removed after adding it to files', e.args[0])
 		sys.exit(1)
 
+	import pdb; pdb.set_trace()
+
 	# `args.command` should be limited to the defined subcommands, but there's not much risk here
 	# anyway.
-	if args.subcommand:
+	if 'subcommand' in args:
 		return_code = globals()['subcommand_' + (args.command + '-' + args.subcommand).replace('-', '_')](db, args) or 0
 	else:
 		return_code = globals()['command_' + args.command.replace('-', '_')](db, args) or 0

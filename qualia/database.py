@@ -179,3 +179,6 @@ class Database:
 	def search(self, query, limit = 10):
 		for result in self.searchdb.search(query, limit = limit):
 			yield File(self, result['hash'], result)
+
+	def checkpoint(self):
+		return self.journal.checkpoint()

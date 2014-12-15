@@ -80,7 +80,7 @@ def parse_editable_metadata(f, editable):
 		if re.match(r'^\s*$', line): continue
 
 		field, text_value = line.split(':', 1)
-		value = parse_metadata(field, text_value[1:])
+		value = parse_metadata(f, field, text_value[1:])
 
 		if value != f.metadata[field]:
 			modifications.append((field, value))
@@ -112,7 +112,7 @@ def format_editable_metadata(f):
 	for field, value in sorted(f.metadata.items()):
 		field_conf = f.db.state['metadata'][field]
 
-		text = '{}: {}'.format(field, re.sub(r'(\\|#)', r'\\\1', format_metadata(field, value)))
+		text = '{}: {}'.format(field, re.sub(r'(\\|#)', r'\\\1', format_metadata(f, field, value)))
 
 		if field_conf['read-only']:
 			read_only_fields.append(text)
