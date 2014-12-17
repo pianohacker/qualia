@@ -34,8 +34,8 @@ class File:
 		if field in self.metadata and self.db.state['metadata'][field]['read-only']:
 			raise common.FieldReadOnlyError(field)
 
+		self.modifications.append((source, field, self.metadata.get(field), value))
 		self.metadata[field] = value
-		self.modifications.append((source, field, value))
 
 	def __repr__(self):
 		return 'qualia.database.File(..., {!r}, {{...}})'.format(self.hash)
@@ -80,7 +80,7 @@ class Database:
 		if path.exists(filename):
 			raise common.FileExistsError(hash)
 
-		self.journal.append(source, hash, 'create')
+		self.journal.append(source, hash, 'add')
 
 		self.searchdb.add(hash)
 
@@ -169,8 +169,8 @@ class Database:
 
 	def save(self, f):
 		t = datetime.datetime.now()
-		for source, field, value in f.modifications:
-			self.journal.append(source, f.hash, 'set', field, value, time = t)
+		for source, field, old_value, value in f.modifications:
+			self.journal.append(source, f.hash, 'set', field, old_value, value, time = t)
 
 		self.searchdb.save(f)
 
@@ -182,3 +182,25 @@ class Database:
 
 	def checkpoint(self):
 		return self.journal.checkpoint()
+
+	def undo(self, checkpoint_id):
+		CAN_UNDO = set(['add', 'set'])
+
+		checkpoint = self.journal.get_checkpoint(checkpoint_id)
+		if checkpoint is None: raise common.CheckpointDoesNotExistError(checkpoint_id)
+
+		for transaction in checkpoint['transactions']:
+			if transaction['op'] not in CAN_UNDO: raise common.UndoFailedError(transaction)
+
+		for hash, transactions in itertools.groupby(sorted(checkpoint['transactions'], key = lambda t: (t['file'], t['op'])), key = lambda t: t['file']):
+			f = self.get(hash)
+
+			for transaction in transactions:
+				if transaction['op'] == 'add':
+					self.delete(f)
+					break
+				elif transaction['op'] == 'set':
+					field, old_value, value = transaction['extra']
+					f.set_metadata(field, old_value)
+			else:
+				self.save(f)

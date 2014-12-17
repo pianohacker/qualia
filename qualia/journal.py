@@ -83,14 +83,23 @@ class Journal:
 		return cur.lastrowid
 
 	def get_checkpoint(self, checkpoint_id):
-		checkpoint = self.db.execute('''
-			SELECT
-				*
-				FROM checkpoints
-				WHERE checkpoint_id = ?
-			''',
-			(checkpoint_id,)
-		).fetchone()
+		if checkpoint_id is None:
+			checkpoint = self.db.execute('''
+					SELECT
+					*
+					FROM checkpoints
+					ORDER BY checkpoint_id DESC
+					LIMIT 1
+				''').fetchone()
+		else:
+			checkpoint = self.db.execute('''
+				SELECT
+					*
+					FROM checkpoints
+					WHERE checkpoint_id = ?
+				''',
+				(checkpoint_id,)
+			).fetchone()
 		if not checkpoint: return None
 
 		last_checkpoint = self.db.execute('''
@@ -101,19 +110,23 @@ class Journal:
 				ORDER BY checkpoint_id DESC
 				LIMIT 1
 			''',
-			(checkpoint_id,)
+			(checkpoint['checkpoint_id'],)
 		).fetchone()
 
 		checkpoint = dict(checkpoint)
 		checkpoint.update(
-			transactions = self.db.execute('''
-				SELECT *
-					FROM journal
-					WHERE serial > ? AND serial <= ?
-					ORDER BY serial
-				''',
-				(last_checkpoint[0] if last_checkpoint else 0, checkpoint['serial'])
-			).fetchall()
+			transactions = [
+				dict(row, extra = pickle.loads(row['extra']))
+				for row in
+				self.db.execute('''
+					SELECT *
+						FROM journal
+						WHERE serial > ? AND serial <= ?
+						ORDER BY serial
+					''',
+					(last_checkpoint[0] if last_checkpoint else 0, checkpoint['serial'])
+				).fetchall()
+			]
 		)
 
 		return checkpoint

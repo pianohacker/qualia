@@ -149,6 +149,18 @@ def command_show(db, args):
 		except common.AmbiguousHashError: error('{}: ambiguous hash', hash)
 		except common.FileDoesNotExistError: error('{}: does not exist', hash)
 
+### `undo`
+@auto_checkpoint
+def command_undo(db, args):
+	try:
+		db.undo(args.checkpoint)
+
+		return 0
+	except common.CheckpointDoesNotExistError: error('checkpoint {}: does not exist', args.checkpoint)
+	except common.UndoFailedError as e: error('could not undo "{}" transaction (no changes done)', e.args[0]['op'])
+
+	return 1
+
 # From http://stackoverflow.com/a/13429281
 class SubcommandHelpFormatter(argparse.RawDescriptionHelpFormatter):
 	def _format_action(self, action):
@@ -329,6 +341,16 @@ def main():
 		const = 'long'
 	)
 
+	p = subparsers.add_parser(
+		'undo',
+		help = 'Undo the last checkpoint',
+	)
+	p.add_argument('checkpoint',
+		help = 'Checkpoint to undo (or last)',
+		metavar = 'CHECKPOINT',
+		nargs = '?',
+	)
+
 	args = parser.parse_args()
 
 	try:
@@ -344,8 +366,6 @@ def main():
 	except common.FieldConfigChangedError as e:
 		error('Configuration for field `{}` changed or removed after adding it to files', e.args[0])
 		sys.exit(1)
-
-	import pdb; pdb.set_trace()
 
 	# `args.command` should be limited to the defined subcommands, but there's not much risk here
 	# anyway.
