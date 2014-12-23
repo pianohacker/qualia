@@ -8,6 +8,7 @@ import datetime
 import os
 from os import path
 import parsedatetime
+import pkg_resources
 import re
 import stat
 import textwrap
@@ -136,25 +137,25 @@ def format_yaml_metadata(f):
 		'  '
 	)
 
-try:
-	import magic
-	magic_db = magic.open(magic.SYMLINK | magic.COMPRESS | magic.MIME_TYPE)
-	magic_db.load()
-except ImportError:
-	magic_db = None
+importers = None
 
-def _auto_add_fs(f, original_filename):
+def _load_importers():
+	global importers
+	importers = []
+
+	for ep in pkg_resources.iter_entry_points(group = 'qualia.auto_metadata_importers'):
+		importers.append(ep.load())
+
+def auto_add_metadata(f, original_filename):
+	if importers is None:
+		_load_importers()
+
+	f.set_metadata('imported-at', datetime.datetime.now(), 'auto')
+
 	f.set_metadata('filename', path.abspath(original_filename), 'auto')
 
 	s = os.stat(original_filename)
 
 	f.set_metadata('file-modified-at', datetime.datetime.fromtimestamp(s.st_mtime), 'auto')
 
-def _auto_add_magic(f, original_filename):
-	if magic_db is None: return
-	f.set_metadata('mime-type', magic_db.file(original_filename), 'auto')
-
-def auto_add_metadata(f, original_filename):
-	f.set_metadata('imported-at', datetime.datetime.now(), 'auto')
-	_auto_add_fs(f, original_filename)
-	_auto_add_magic(f, original_filename)
+	for importer in importers: importer(f, original_filename)

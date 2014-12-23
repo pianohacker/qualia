@@ -127,7 +127,17 @@ DB_STATE_BASE = DictItem(
 			read_only = FixedItem(False),
 			shown = Item(bool, True),
 		),
-		mime_type = DictItem(
+		image_height = DictItem(
+			type = FixedItem('number'),
+			read_only = FixedItem(False),
+			shown = Item(bool, True),
+		),
+		image_width = DictItem(
+			type = FixedItem('number'),
+			read_only = FixedItem(False),
+			shown = Item(bool, True),
+		),
+		magic_mime_type = DictItem(
 			type = FixedItem('exact-text'),
 			read_only = FixedItem(False),
 			shown = Item(bool, True),

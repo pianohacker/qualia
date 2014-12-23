@@ -13,7 +13,7 @@ from . import common, config, journal, search
 VERSION = 1
 
 def get_default_path():
-	return path.expanduser('~/q')
+	return os.environ.get('XDG_DATA_HOME', path.expanduser('~/.local/share'))
 
 class File:
 	def __init__(self, db, hash, metadata):

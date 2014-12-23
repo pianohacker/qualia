@@ -15,6 +15,9 @@ class Journal:
 		self.has_changes = False
 
 	def upgrade_if_needed(self):
+		# Make SQLite use a write-ahead instead of a delete-based journal; see
+		# https://www.sqlite.org/wal.html for more info.
+		self.db.execute('PRAGMA journal_mode=WAL;');
 		version = self.db.execute('PRAGMA user_version').fetchone()[0]
 
 		if version < 1:
