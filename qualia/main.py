@@ -2,6 +2,7 @@
 from . import common, config, conversion, database
 
 import argparse
+import collections
 import functools
 import os
 import tempfile
@@ -116,6 +117,18 @@ def subcommand_field_list(db, args):
 def command_find_hashes(db, args):
 	for hash in db.find_hashes(args.prefix):
 		print(hash)
+
+### `log`
+def command_log(db, args):
+	for checkpoint in db.all_checkpoints():
+		print('#{}: '.format(checkpoint['checkpoint_id']), end = '')
+
+		types = collections.defaultdict(lambda: 0)
+
+		for transaction in checkpoint['transactions']:
+			types[transaction['op']] += 1
+
+		print(', '.join('{} "{}"'.format(types[t], t) for t in sorted(types.keys())))
 
 ### `search`
 def command_search(db, args):
@@ -274,6 +287,11 @@ def main():
 	p.add_argument('prefix',
 		help = 'prefix to hashes to look for',
 		metavar = 'PREFIX',
+	)
+
+	p = subparsers.add_parser(
+		'log',
+		help = 'Print modifications to the database',
 	)
 
 	p = subparsers.add_parser(

@@ -204,3 +204,7 @@ class Database:
 					f.set_metadata(field, old_value)
 			else:
 				self.save(f)
+
+	def all_checkpoints(self):
+		for checkpoint_id in self.journal.all_checkpoint_ids():
+			yield self.journal.get_checkpoint(checkpoint_id)
