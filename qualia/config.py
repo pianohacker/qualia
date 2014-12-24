@@ -1,6 +1,13 @@
+import copy
 import os
 from os import path
 import yaml
+
+def first_set(*args):
+	for arg in args:
+		if arg is not None: return arg
+
+	return None
 
 def get_default_path():
 	return path.join(os.environ.get('XDG_CONFIG_HOME', path.expanduser('~/.config')), 'qualia.yaml')
@@ -19,7 +26,7 @@ class Item:
 		return value if value != self.default else None
 
 	def merge(self, start, value):
-		return (self.default if start is None else start) if value is None else value
+		return first_set(value, start, self.default)
 	
 	def verify(self, path, value):
 		if value is None: return
@@ -33,6 +40,9 @@ class Item:
 class DictItem(Item):
 	def __init__(self, **kwargs):
 		super().__init__(dict, {key.replace('_', '-'): value for key, value in kwargs.items()})
+
+	def __getitem__(self, key):
+		return self.default[key]
 
 	def diff(self, value):
 		result = {}
@@ -49,7 +59,7 @@ class DictItem(Item):
 
 		return result or None
 
-	def merge(self, start, value):
+	def merge(self, start, value, *, known_only = False):
 		start = start or {}
 		result = dict(start)
 		value = value or {}
@@ -58,8 +68,9 @@ class DictItem(Item):
 			if key == '-others': continue
 			result[key] = self.default[key].merge(start.get(key), value.get(key))
 		
-		for key in set(value) - set(self.default):
-			result[key] = self.default['-others'].merge(start.get(key), value[key])
+		if not known_only:
+			for key in set(value) - set(self.default):
+				result[key] = self.default['-others'].merge(start.get(key), value[key])
 
 		return result
 
@@ -81,6 +92,21 @@ class DictItem(Item):
 		else:
 			raise ConstrainedError(path, 'unexpected keys: {}'.format(', '.join(repr(x) for x in extra_keys)))
 
+class DerivedDictItem(DictItem):
+	def __init__(self, base, **kwargs):
+		new_default = dict(base.default)
+
+		for key, item in kwargs.items():
+			if isinstance(item, Item):
+				new_default[key] = item
+			else:
+				new_item = copy.copy(base.default[key])
+				new_item.default = item
+
+				new_default[key] = new_item
+
+		super().__init__(**new_default)
+
 class FixedItem(Item):
 	def __init__(self, value):
 		super().__init__(type(value), value)
@@ -100,72 +126,88 @@ class PathItem(Item):
 		super().__init__(str, value)
 
 	def merge(self, start, value):
-		result = (self.default if start is None else start) if value is None else value
+		result = first_set(value, start, self.default)
 
 		return result if result is None else path.expanduser(result)
 
+class ListItem(Item):
+	def __init__(self, child_item, value):
+		super().__init__(list, value)
+
+		self.child_item = child_item
+
+	def verify(self, path, value):
+		if value is None: return
+
+		super().verify(path, value)
+
+		for i, x in enumerate(value):
+			key = '[{}]'.format(i)
+			self.child_item.verify(key if path is None else (path + key), x)
+
+class NoVerifyItem(Item):
+	def __init__(self, value):
+		super().__init__(None, value)
+
+	def verify(self, path, value):
+		pass
+
+_FIELD_ITEM = DictItem(
+	type = Item(set(['exact-text', 'text', 'id', 'number', 'keyword', 'datetime']), 'text'),
+	aliases = ListItem(Item(str, None), []),
+	read_only = Item(bool, False),
+	shown = Item(bool, True),
+)
+
 CONF_BASE = DictItem(
-	database_path = PathItem(None)
+	database_path = PathItem(None),
+	fields = NoVerifyItem({}),
 )
 
 DB_STATE_BASE = DictItem(
 	version = Item(int, None),
-	metadata = DictItem(
-		hash = DictItem(
+	fields = DictItem(
+		hash = DerivedDictItem(_FIELD_ITEM,
 			type = FixedItem('id'),
 			read_only = FixedItem(True),
 			shown = Item(bool, False),
 		),
-		comments = DictItem(
+		comments = DerivedDictItem(_FIELD_ITEM,
 			type = FixedItem('text'),
-			read_only = FixedItem(False),
-			shown = Item(bool, True),
 		),
-		file_modified_at = DictItem(
+		file_modified_at = DerivedDictItem(_FIELD_ITEM,
 			type = FixedItem('datetime'),
-			read_only = FixedItem(False),
-			shown = Item(bool, True),
 		),
-		filename = DictItem(
+		filename = DerivedDictItem(_FIELD_ITEM,
 			type = FixedItem('exact-text'),
-			read_only = FixedItem(False),
-			shown = Item(bool, True),
 		),
-		imported_at = DictItem(
+		imported_at = DerivedDictItem(_FIELD_ITEM,
 			type = FixedItem('datetime'),
-			read_only = FixedItem(False),
-			shown = Item(bool, True),
 		),
-		image_height = DictItem(
+		image_height = DerivedDictItem(_FIELD_ITEM,
 			type = FixedItem('number'),
-			read_only = FixedItem(False),
-			shown = Item(bool, True),
+			aliases = ['height'],
 		),
-		image_width = DictItem(
+		image_width = DerivedDictItem(_FIELD_ITEM,
 			type = FixedItem('number'),
-			read_only = FixedItem(False),
-			shown = Item(bool, True),
+			aliases = ['width'],
 		),
-		magic_mime_type = DictItem(
+		magic_mime_type = DerivedDictItem(_FIELD_ITEM,
 			type = FixedItem('exact-text'),
-			read_only = FixedItem(False),
-			shown = Item(bool, True),
+			aliases = ['mime'],
 		),
-		tags = DictItem(
+		tags = DerivedDictItem(_FIELD_ITEM,
 			type = FixedItem('keyword'),
-			read_only = FixedItem(False),
-			shown = Item(bool, True),
 		),
-		_others = DictItem(
-			type = Item(set(['exact-text', 'text', 'id', 'number', 'keyword', 'datetime']), 'text'),
-			read_only = Item(bool, False),
-			shown = Item(bool, True),
-		),
+		_others = _FIELD_ITEM,
 	),
 )
 
 conf = {}
-db_state = {}
+
+def load_over(source, destination, base, *, known_only = False):
+	base.verify(None, source)
+	destination.update(base.merge(destination, source, known_only = known_only))
 
 def load(filename, destination, base):
 	try:
@@ -173,8 +215,7 @@ def load(filename, destination, base):
 	except FileNotFoundError:
 		user_config = {}
 
-	base.verify(None, user_config)
-	destination.update(base.merge(destination, user_config))
+	load_over(user_config, destination, base)
 
 def save(filename, value, base):
 	diff = base.diff(value)

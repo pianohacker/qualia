@@ -67,7 +67,7 @@ class _FieldAliasPlugin(qparser.Plugin):
 class SearchDatabase:
 	def __init__(self, db, base_path):
 		self.db = db
-		self.configured_fields = {field: _create_field_type(value) for field, value in self.db.state['metadata'].items()}
+		self.configured_fields = {field: _create_field_type(value) for field, value in self.db.fields.items()}
 
 		if index.exists_in(base_path):
 			self.index = index.open_dir(base_path)

@@ -1,4 +1,5 @@
 import codecs
+import copy
 import datetime
 import glob
 import hashlib
@@ -28,10 +29,10 @@ class File:
 		return self.db.get_shortest_hash(self.hash)
 
 	def set_metadata(self, field, value, source = 'user'):
-		if field not in self.db.state['metadata']:
+		if field not in self.db.fields:
 			raise common.FieldDoesNotExistError(field)
 
-		if field in self.metadata and self.db.state['metadata'][field]['read-only']:
+		if field in self.metadata and self.db.fields[field]['read-only']:
 			raise common.FieldReadOnlyError(field)
 
 		self.modifications.append((source, field, self.metadata.get(field), value))
@@ -51,6 +52,8 @@ class Database:
 		self.init_if_needed()
 		self.state = {}
 		config.load(path.join(self.db_path, 'state'), self.state, config.DB_STATE_BASE)
+		self.fields = copy.deepcopy(self.state['fields'])
+		config.load_over(config.conf['fields'], self.fields, config.DB_STATE_BASE['fields'])
 
 		if self.state['version'] is None:
 			self.state['version'] = VERSION

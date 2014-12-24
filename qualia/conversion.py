@@ -56,7 +56,7 @@ def _parse_number(field, field_conf, text_value):
 		raise common.InvalidFieldValue(field, text_value)
 
 def parse_metadata(f, field, text_value):
-	field_conf = f.db.state['metadata'][field]
+	field_conf = f.db.fields[field]
 
 	return globals().get('_parse_' + field_conf['type'].replace('-', '_'), _parse_exact_text)(field, field_conf, text_value)
 
@@ -98,7 +98,7 @@ def _format_exact_text(field_conf, value):
 	return str(value)
 
 def format_metadata(f, field, value):
-	field_conf = f.db.state['metadata'][field]
+	field_conf = f.db.fields[field]
 
 	return globals().get('_format_' + field_conf['type'].replace('-', '_'), _format_exact_text)(field_conf, value)
 
@@ -112,7 +112,7 @@ def format_editable_metadata(f):
 	editable_fields = []
 
 	for field, value in sorted(f.metadata.items()):
-		field_conf = f.db.state['metadata'][field]
+		field_conf = f.db.fields[field]
 
 		text = '{}: {}'.format(field, re.sub(r'(\\|#)', r'\\\1', format_metadata(f, field, value)))
 

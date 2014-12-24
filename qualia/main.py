@@ -32,6 +32,7 @@ def show_file(db, f, args):
 	elif args.format == 'long':
 		print('{}:'.format(f.short_hash))
 		for field in sorted(f.metadata.keys()):
+			if not db.fields[field]['shown']: continue
 			print('    {}: {}'.format(field, conversion.format_metadata(f, field, f.metadata[field])))
 		print()
 	elif args.format == 'short_hash':
@@ -115,7 +116,7 @@ def command_exists(db, args):
 
 ### `field list`
 def subcommand_field_list(db, args):
-	for field in sorted(db.state['metadata']):
+	for field in sorted(db.fields):
 		print(field)
 
 ### `find-hashes`
