@@ -35,7 +35,12 @@ class File:
 			raise common.FieldReadOnlyError(field)
 
 		self.modifications.append((source, field, self.metadata.get(field), value))
-		self.metadata[field] = value
+
+		if value is None:
+			# Don't raise KeyError if key does not exist
+			self.metadata.pop(field, None)
+		else:
+			self.metadata[field] = value
 
 	def __repr__(self):
 		return 'qualia.database.File(..., {!r}, {{...}})'.format(self.hash)
@@ -205,6 +210,6 @@ class Database:
 			else:
 				self.save(f)
 
-	def all_checkpoints(self):
-		for checkpoint_id in self.journal.all_checkpoint_ids():
+	def all_checkpoints(self, *, order = 'asc'):
+		for checkpoint_id in self.journal.all_checkpoint_ids(order = order):
 			yield self.journal.get_checkpoint(checkpoint_id)

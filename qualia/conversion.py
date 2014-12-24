@@ -8,6 +8,7 @@ import datetime
 import os
 from os import path
 import parsedatetime
+import pickle
 import pkg_resources
 import re
 import stat
@@ -83,7 +84,7 @@ def parse_editable_metadata(f, editable):
 		field, text_value = line.split(':', 1)
 		value = parse_metadata(f, field, text_value[1:])
 
-		if value != f.metadata[field]:
+		if value != f.metadata.get(field):
 			modifications.append((field, value))
 			f.set_metadata(field, value)
 
@@ -128,9 +129,18 @@ def format_editable_metadata(f):
 
 	return '\n'.join(result)
 
+def format_yaml_checkpoint(checkpoint):
+	return '-\n' + textwrap.indent(
+		yaml.safe_dump(
+			checkpoint,
+			default_flow_style = False
+		),
+		'  '
+	)
+
 def format_yaml_metadata(f):
 	return f.hash + ':\n' + textwrap.indent(
-		yaml.dump(
+		yaml.safe_dump(
 			{key: value for key, value in f.metadata.items() if key != 'hash'},
 			default_flow_style = False
 		),

@@ -60,8 +60,13 @@ def command_delete(db, args):
 			db.delete(db.get(hash))
 		except common.FileDoesNotExistError: error('{}: does not exist', hash)
 
-### `dump-metadata`
-def command_dump_metadata(db, args):
+### `dump metadata`
+def subcommand_dump_journal(db, args):
+	for checkpoint in db.all_checkpoints():
+		print(conversion.format_yaml_checkpoint(checkpoint))
+
+### `dump metadata`
+def subcommand_dump_metadata(db, args):
 	for f in db.all():
 		print(conversion.format_yaml_metadata(f))
 
@@ -120,7 +125,7 @@ def command_find_hashes(db, args):
 
 ### `log`
 def command_log(db, args):
-	for checkpoint in db.all_checkpoints():
+	for checkpoint in db.all_checkpoints(order = 'desc'):
 		print('#{}: '.format(checkpoint['checkpoint_id']), end = '')
 
 		types = collections.defaultdict(lambda: 0)
@@ -234,7 +239,23 @@ def main():
 	)
 
 	p = subparsers.add_parser(
-		'dump-metadata',
+		'dump',
+		help = 'Dump raw information from the database',
+	)
+
+	dump_subparsers = p.add_subparsers(
+		title = 'subcommands',
+		dest = 'subcommand',
+		metavar = '<subcommand>',
+	)
+
+	dp = dump_subparsers.add_parser(
+		'journal',
+		help = 'Dump all checkpoints in YAML format',
+	)
+
+	dp = dump_subparsers.add_parser(
+		'metadata',
 		help = 'Dump metadata for all files in YAML format',
 	)
 

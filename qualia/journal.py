@@ -134,6 +134,6 @@ class Journal:
 
 		return checkpoint
 
-	def all_checkpoint_ids(self):
-		for row in self.db.execute('SELECT checkpoint_id FROM checkpoints ORDER BY checkpoint_id DESC').fetchall():
+	def all_checkpoint_ids(self, *, order = 'asc'):
+		for row in self.db.execute('SELECT checkpoint_id FROM checkpoints ORDER BY checkpoint_id ' + ('DESC' if order == 'desc' else 'ASC')).fetchall():
 			yield row[0]
