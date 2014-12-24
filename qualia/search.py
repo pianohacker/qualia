@@ -84,6 +84,10 @@ class SearchDatabase:
 
 		self.field_alias_map = {}
 
+		for field, value in self.db.fields.items():
+			for alias in value['aliases']:
+				self.field_alias_map[alias] = field
+
 	def add(self, hash):
 		writer = self.index.writer()
 		# We use update_document, rather than add_document, so this function can be mostly
@@ -106,7 +110,6 @@ class SearchDatabase:
 		parser.add_plugin(qparser.WildcardPlugin())
 		parser.replace_plugin(qparser.FieldsPlugin(expr=r"(?P<text>[\w-]+|[*]):", remove_unknown = False))
 		parser.add_plugin(_FieldAliasPlugin(self.field_alias_map))
-		print(parser.process(query))
 
 		return parser.parse(query)
 
