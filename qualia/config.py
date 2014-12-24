@@ -95,8 +95,17 @@ class FixedItem(Item):
 		if value != None and value != self.default:
 			raise ConstrainedError(path, 'cannot be changed')
 
+class PathItem(Item):
+	def __init__(self, value):
+		super().__init__(str, value)
+
+	def merge(self, start, value):
+		result = (self.default if start is None else start) if value is None else value
+
+		return result if result is None else path.expanduser(result)
+
 CONF_BASE = DictItem(
-	database_path = Item(str, None)
+	database_path = PathItem(None)
 )
 
 DB_STATE_BASE = DictItem(

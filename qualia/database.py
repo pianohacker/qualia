@@ -13,7 +13,7 @@ from . import common, config, journal, search
 VERSION = 1
 
 def get_default_path():
-	return os.environ.get('XDG_DATA_HOME', path.expanduser('~/.local/share'))
+	return path.join(os.environ.get('XDG_DATA_HOME', path.expanduser('~/.local/share')), 'qualia')
 
 class File:
 	def __init__(self, db, hash, metadata):
@@ -45,7 +45,7 @@ class Database:
 		self.db_path = db_path
 		self.init_if_needed()
 		self.state = {}
-		config.load(path.join(self.db_path, 'db_state.yaml'), self.state, config.DB_STATE_BASE)
+		config.load(path.join(self.db_path, 'state'), self.state, config.DB_STATE_BASE)
 
 		if self.state['version'] is None:
 			self.state['version'] = VERSION
@@ -56,7 +56,7 @@ class Database:
 		self.searchdb = search.SearchDatabase(self, path.join(self.db_path, 'search'))
 
 	def close(self):
-		config.save(os.path.join(self.db_path, 'db_state.yaml'), self.state, config.DB_STATE_BASE)
+		config.save(os.path.join(self.db_path, 'state'), self.state, config.DB_STATE_BASE)
 
 	def init_if_needed(self):
 		if not path.exists(self.db_path):
