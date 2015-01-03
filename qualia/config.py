@@ -1,46 +1,86 @@
+## Imports
 import copy
 import os
 from os import path
 import yaml
 
+## Utility functions
+# This returns the first of its arguments that are not `None` (if any).
 def first_set(*args):
 	for arg in args:
 		if arg is not None: return arg
 
 	return None
 
+# Returns the default path to the config file (respecting XDG).
 def get_default_path():
 	return path.join(os.environ.get('XDG_CONFIG_HOME', path.expanduser('~/.config')), 'qualia.yaml')
 
+## Exceptions
+# This exception is thrown when a read-only config variable is changed or a variable is set to an
+# invalid value.
 class ConstrainedError(Exception):
 	def __init__(self, path, message):
 		self.path = path
 		self.message = message
 
+## Config hierarchy
+# Each level in the hierarchy is represented by some kind of `Item`. This base type can take care of
+# a basic value with a set type and default value, and has three key methods that can be overridden
+# for more complex items.
 class Item:
+	# Any values set for this item will be checked to make sure they inherit from `type`. As with
+	# `isinstance`, `type` can be a tuple of types. It can also be a `set` of possible values, in
+	# which case the defined value must be in the set.
+	#
+	# `default` will be used if the value is not set in the user's config. Note that it is not
+	# checked against `type`.
 	def __init__(self, type, default):
 		self.type = type
 		self.default = default
 
+	# This method should return the difference between the given value and this item's default, or
+	# `None`. This is used for saving configuration files back to disk, and ensures that only the
+	# values that are different are saved.
 	def diff(self, value):
 		return value if value != self.default else None
 
+	# This method should return the result of applying the given `value` to this item, possibly
+	# given an already loaded config value `start`  which may be `None`.
 	def merge(self, start, value):
 		return first_set(value, start, self.default)
-	
+
+	# And finally, this method should check that the given value is valid for this item.
+	#
+	# The path argument should be passed along to any recursive calls, and indicates where in the
+	# config hierarchy any errors occured.
 	def verify(self, path, value):
 		if value is None: return
 
+		# The base implementation simply checks that the value is either:
 		if isinstance(self.type, set):
+			# a) one of the values given
 			if value not in self.type:
+				# This is the first example of a widespread problem within this module; unlike most
+				# of the backend module, this module creates exceptions with embedded messages. This
+				# could make future translation difficult.
 				raise ConstrainedError(path, 'must be one of {}'.format(', '.join(repr(x) for x in self.type)))
 		elif not isinstance(value, self.type):
+			# or b) inherits from the given type
 			raise ConstrainedError(path, 'must be a {}'.format(self.type.__name__))
 
+# `DictItem`s represent mappings within the config hierarchy, and can contain default values for
+# given names underneath it and for any other name (under the key `-other`).
+#
+# Values provided for these items are merged in recursively, with each child item controlling how
+# provided values are merged.
 class DictItem(Item):
+	# For convenience, keys are expected `separated_by_underscores` in the `kwargs` list but are
+	# converted to `separated-by-hyphens`. This is the form they are expected in in the config file.
 	def __init__(self, **kwargs):
 		super().__init__(dict, {key.replace('_', '-'): value for key, value in kwargs.items()})
 
+	# This magic method is given for convenience when merging part of a config hierarchy.
 	def __getitem__(self, key):
 		return self.default[key]
 
@@ -92,6 +132,11 @@ class DictItem(Item):
 		else:
 			raise ConstrainedError(path, 'unexpected keys: {}'.format(', '.join(repr(x) for x in extra_keys)))
 
+# This subclass of `DictItem` makes it easy to create a new `DictItem` based on an existing one but
+# with additional or changed keys.
+#
+# As a shortcut, if one provides something besides an `Item` subclass for a key, it is assumed that
+# one only wishes to change the default value for that key.
 class DerivedDictItem(DictItem):
 	def __init__(self, base, **kwargs):
 		new_default = dict(base.default)
@@ -107,6 +152,7 @@ class DerivedDictItem(DictItem):
 
 		super().__init__(**new_default)
 
+# This subclass is used to create an item with a fixed type and value.
 class FixedItem(Item):
 	def __init__(self, value):
 		super().__init__(type(value), value)
@@ -121,6 +167,7 @@ class FixedItem(Item):
 		if value != None and value != self.default:
 			raise ConstrainedError(path, 'cannot be changed')
 
+# This string-specific subclass is used for paths, and will expand any tildes in the provided value.
 class PathItem(Item):
 	def __init__(self, value):
 		super().__init__(str, value)
@@ -128,8 +175,11 @@ class PathItem(Item):
 	def merge(self, start, value):
 		result = first_set(value, start, self.default)
 
+		# However, it can still contain `None`.
 		return result if result is None else path.expanduser(result)
 
+# Like `DictItem`, this subclass contains other `Item`s, but this time only takes a single `Item` as
+# an argument, which all child values will be compared against.
 class ListItem(Item):
 	def __init__(self, child_item, value):
 		super().__init__(list, value)
@@ -145,6 +195,9 @@ class ListItem(Item):
 			key = '[{}]'.format(i)
 			self.child_item.verify(key if path is None else (path + key), x)
 
+# This item will not attempt to do any validity checking of any provided values. It is currently
+# used for the metadata block in the global config, which is checked and merged against the database
+# state.
 class NoVerifyItem(Item):
 	def __init__(self, value):
 		super().__init__(None, value)
@@ -152,6 +205,8 @@ class NoVerifyItem(Item):
 	def verify(self, path, value):
 		pass
 
+## Default config hierarchies
+# This is the base used for all of the `DerivedDictItem`s defined for the default metadata fields.
 _FIELD_ITEM = DictItem(
 	type = Item(set(['exact-text', 'text', 'id', 'number', 'keyword', 'datetime']), 'text'),
 	aliases = ListItem(Item(str, None), []),
@@ -159,13 +214,27 @@ _FIELD_ITEM = DictItem(
 	shown = Item(bool, True),
 )
 
+# Each of the following bases represents the layout of their respective config files. For instance,
+# a valid config file for `CONF_BASE` would be:
+#
+#> database-path: ~/q
+#
+# which would be merged to yield a final result of `{'database-path': '/home/user/q', 'fields':
+# {}}`.
+#
+# This particular base is for the user's global config file.
 CONF_BASE = DictItem(
 	database_path = PathItem(None),
 	fields = NoVerifyItem({}),
 )
 
+# This base, on the other hand, is for the database state file, which is not intended to be edited
+# by the user.
 DB_STATE_BASE = DictItem(
 	version = Item(int, None),
+	# There is a complicated song and dance done in `qualia.database` to make sure that any
+	# modifications the user has done to the metadata fields in their global config file are applied
+	# to the fields configuration but not saved back to the state file.
 	fields = DictItem(
 		hash = DerivedDictItem(_FIELD_ITEM,
 			type = FixedItem('id'),
@@ -205,6 +274,7 @@ DB_STATE_BASE = DictItem(
 
 conf = {}
 
+## Functions
 def load_over(source, destination, base, *, known_only = False):
 	base.verify(None, source)
 	destination.update(base.merge(destination, source, known_only = known_only))

@@ -1,3 +1,5 @@
+## Imports
+
 import codecs
 import copy
 import datetime
@@ -11,11 +13,27 @@ import stat
 
 from . import common, config, journal, search
 
+## Constants
+# Each major database revision has a version number; we're currently only on version 1, but this
+# might be needed for sanity checking in the future. It's stored in the `state` file for now.
+
 VERSION = 1
 
+## Utility functions
+# Get the default database location, respecting the default or any user-configured XDG data
+# directories.
+#
+# TODO: Make this auto create ~/.local and ~/.local/share if needed.
 def get_default_path():
 	return path.join(os.environ.get('XDG_DATA_HOME', path.expanduser('~/.local/share')), 'qualia')
 
+## File
+# This class is the core container for all files within a database.
+#
+# Design notes: an instance of a file is always assumed to correlate to a valid and existing file
+# within the database, and any `File` objects for deleted objects should be quickly deleted. Also,
+# this class contains no intelligence or database manipulation methods; all such code should be in
+# the `Database` class.
 class File:
 	def __init__(self, db, hash, metadata):
 		self.db = db
@@ -38,14 +56,19 @@ class File:
 		self.modifications.append((source, field, self.metadata.get(field), value))
 
 		if value is None:
-			# Don't raise KeyError if key does not exist
+			# Don't raise a spurious KeyError if the key does not exist.
 			self.metadata.pop(field, None)
 		else:
 			self.metadata[field] = value
 
+	# The `__repr__` of a `File` only shows its hash, as any useful information about the `Database`
+	# or metadata would be too long to be practical.
 	def __repr__(self):
 		return 'qualia.database.File(..., {!r}, {{...}})'.format(self.hash)
 
+## Database
+# This is the core database class, and contains most code that operates directly on the set of
+# stored files as well as serving as an intermediary to the journal and search index.
 class Database:
 	def __init__(self, db_path):
 		self.db_path = db_path
@@ -63,6 +86,10 @@ class Database:
 		self.journal = journal.Journal(path.join(self.db_path, 'journal'))
 		self.searchdb = search.SearchDatabase(self, path.join(self.db_path, 'search'))
 
+	# This should be called once the UI is done with the database.
+	#
+	# Currently, this only saves the `state`, as the journal and search index are only kept open for
+	# long enough to make changes.
 	def close(self):
 		config.save(os.path.join(self.db_path, 'state'), self.state, config.DB_STATE_BASE)
 
@@ -188,24 +215,31 @@ class Database:
 		for result in self.searchdb.search(query, limit = limit):
 			yield File(self, result['hash'], result)
 
+	# Set a checkpoint, grouping together a set of individual transactions as a single operation.
 	def checkpoint(self):
 		return self.journal.checkpoint()
 
+	# Undo a given checkpoint (can be `None` to undo the latest).
 	def undo(self, checkpoint_id):
+		# We can currently only undo `add`s and `set`s; `delete`s are impossible by definition.
 		CAN_UNDO = set(['add', 'set'])
 
+		# Retrieve the checkpoint and make sure that we can undo all of its transactions.
 		checkpoint = self.journal.get_checkpoint(checkpoint_id)
 		if checkpoint is None: raise common.CheckpointDoesNotExistError(checkpoint_id)
 
 		for transaction in checkpoint['transactions']:
 			if transaction['op'] not in CAN_UNDO: raise common.UndoFailedError(transaction)
 
+		# Undo each all transactions for each file in order. We also sort on operation, which
+		# coincidentally means that we can undo `add`s before trying to undo any relevant `set`s.
 		for hash, transactions in itertools.groupby(sorted(checkpoint['transactions'], key = lambda t: (t['file'], t['op'])), key = lambda t: t['file']):
 			f = self.get(hash)
 
 			for transaction in transactions:
 				if transaction['op'] == 'add':
 					self.delete(f)
+					# There's no reason to do anything else once we've deleted the file.
 					break
 				elif transaction['op'] == 'set':
 					field, old_value, value = transaction['extra']
@@ -213,6 +247,7 @@ class Database:
 			else:
 				self.save(f)
 
+	# Retrieve all checkpoints (with transactions). `order` can be set to `'asc'` or `'desc'`.
 	def all_checkpoints(self, *, order = 'asc'):
 		for checkpoint_id in self.journal.all_checkpoint_ids(order = order):
 			yield self.journal.get_checkpoint(checkpoint_id)
