@@ -10,6 +10,8 @@ import shutil
 import sys
 
 ## Utility functions
+# A decorator that automatically places a checkpoint after its decorated function runs if it does
+# not return nonzero or raise an exception.
 def auto_checkpoint(func):
 	@functools.wraps(func)
 	def wrapper(db, args):
@@ -21,9 +23,12 @@ def auto_checkpoint(func):
 
 	return wrapper
 
+# Simple convenience function that outputs to `stderr` and automatically calls format with the given
+# message and args.
 def error(message, *args):
 	print(message.format(*args), file = sys.stderr)
 
+# Core function that outputs a view of the given file. Used by `search` and `show`.
 def show_file(db, f, args):
 	if args.format == 'filename':
 		print(db.get_filename(f))
@@ -79,10 +84,14 @@ def command_edit(db, args):
 
 		editable = conversion.format_editable_metadata(f)
 
+		# This plays tricks with process launching and mutual file access that are not safe for
+		# those under 18 and, probably, any edge cases. Proceed at your own risk.
 		metadata_f = tempfile.NamedTemporaryFile(mode = 'w+t', encoding = 'utf-8')
 		metadata_f.write(editable)
 		metadata_f.flush()
 
+		# This will eventually need to get abstracted out. This whole process should be, actually,
+		# and should deal with cases like backgrounded editors.
 		editor = os.environ.get('EDITOR', os.environ.get('VISUAL', 'vi'))
 
 		if os.system(editor + ' ' + metadata_f.name) != 0:
@@ -180,7 +189,10 @@ def command_undo(db, args):
 
 	return 1
 
-# From http://stackoverflow.com/a/13429281
+# From: http://stackoverflow.com/a/13429281
+#
+# This makes sure that the help message for the `command` argument isn't printed. It would be nice
+# if it did the same for `subcommand`.
 class SubcommandHelpFormatter(argparse.RawDescriptionHelpFormatter):
 	def _format_action(self, action):
 		parts = super(argparse.RawDescriptionHelpFormatter, self)._format_action(action)
@@ -188,10 +200,13 @@ class SubcommandHelpFormatter(argparse.RawDescriptionHelpFormatter):
 			parts = "\n".join(parts.split("\n")[1:])
 		return parts
 
+## Main
 def main():
-	# Read in terminal size
+	# Read in terminal size, and store it back into the environment. This might make argparse happy
+	# somehow.
 	os.environ['COLUMNS'] = str(shutil.get_terminal_size().columns)
 
+	### Argument parsing
 	parser = argparse.ArgumentParser(
 		prog = 'qualia',
 		formatter_class = SubcommandHelpFormatter,
@@ -206,6 +221,7 @@ def main():
 		default = config.get_default_path()
 	)
 
+	### Commands
 	subparsers = parser.add_subparsers(
 		title = 'commands',
 		dest = 'command',
@@ -393,20 +409,24 @@ def main():
 
 	args = parser.parse_args()
 
+	### Setup
+	# The global user config has to be loaded, followed by the database-specific config (as the
+	# former may change the default database location).
 	try:
-		config.load(args.config, config.conf, config.CONF_BASE)
+		config.conf = config.load(args.config, config.CONF_BASE)
 		db_path = args.db_path or config.conf['database-path'] or database.get_default_path()
-		config.load(os.path.join(db_path, 'config.yaml'), config.conf, config.CONF_BASE)
+		config.conf = config.load(os.path.join(db_path, 'config.yaml'), config.CONF_BASE, start = config.conf)
+
+		# Then, finally, we can load the database.
+		db = database.Database(db_path)
 	except config.ConstrainedError as e:
 		error('error in configuration file: {}', ('{}: {}'.format(*e.args)) if e.args[0] else e.args[1])
 		sys.exit(1)
-
-	try:
-		db = database.Database(db_path)
 	except common.FieldConfigChangedError as e:
 		error('Configuration for field `{}` changed or removed after adding it to files', e.args[0])
 		sys.exit(1)
 
+	### Running command
 	# `args.command` should be limited to the defined subcommands, but there's not much risk here
 	# anyway.
 	if 'subcommand' in args:

@@ -275,18 +275,26 @@ DB_STATE_BASE = DictItem(
 conf = {}
 
 ## Functions
-def load_over(source, destination, base, *, known_only = False):
-	base.verify(None, source)
-	destination.update(base.merge(destination, source, known_only = known_only))
+# This is the base config loader. It can take a value and merge it on top of the base (and
+# optionally a starting value.)
+#
+# If `known_only` is true, then the top level will ignore any keys that did not exist in the
+# starting value.
+def load_value(value, base, *, start = None, known_only = False):
+	base.verify(None, value)
+	return base.merge(start, value, known_only = known_only)
 
-def load(filename, destination, base):
+# Same as the above, but will try to load YAML from `filename`, using `None` if that fails.
+def load(filename, base, *, start = None, known_only = False):
 	try:
 		user_config = yaml.load(open(filename, 'r', encoding = 'utf-8'))
 	except FileNotFoundError:
 		user_config = {}
 
-	load_over(user_config, destination, base)
+	return load_value(user_config, base, start = start, known_only = known_only)
 
+# Saves any parts of the given config that have changed back to filename as YAML. This should only
+# be used for non-user-visible config files, as it will destroy their formatting and comments.
 def save(filename, value, base):
 	diff = base.diff(value)
 	if diff: yaml.dump(diff, stream = open(filename, 'w', encoding = 'utf-8'), default_flow_style = False)
