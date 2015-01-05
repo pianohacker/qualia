@@ -211,7 +211,7 @@ class Database:
 	
 	# This gets the shortest unambiguous shortened version of the given hash.
 	def get_shortest_hash(self, hash):
-		baselen = 2
+		baselen = 4
 
 		while True:
 			# This is a bit ugly, but basically gets the first two results from the iterator
