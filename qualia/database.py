@@ -185,13 +185,13 @@ class Database:
 	#
 	# By default, it does not do so for automatically-added metadata, assuming that it will be
 	# automatically added with equal or better quality.
-	def restore_metadata(self, f, only_auto = True):
+	def restore_metadata(self, f, no_auto = True):
 		modifications = {}
 
 		# To save a little bit of thrashing, we go through the transactions (implicitly assumed to
 		# be in order) and find the most recent version of the metadata.
 		for transaction in self.journal.get_transactions(f.hash, 'set'):
-			if only_auto and transaction['source'] == 'auto': continue
+			if no_auto and transaction['source'] == 'auto': continue
 
 			field, value = transaction['extra']
 
