@@ -194,6 +194,24 @@ def command_show(db, args):
 		except common.AmbiguousHashError: error('{}: ambiguous hash', hash)
 		except common.FileDoesNotExistError: error('{}: does not exist', hash)
 
+### `set`
+@auto_checkpoint
+def command_tag(db, args):
+	try:
+		f = db.get(args.hash)
+
+		value = f.metadata.get('tags', '')
+		if args.tag not in value.split():
+			value += (' ' if value else '') + args.tag
+		f.set_metadata('tags', value)
+		db.save(f)
+
+		return 0
+	except common.AmbiguousHashError: error('{}: ambiguous hash', args.hash)
+	except common.FileDoesNotExistError: error('{}: does not exist', args.hash)
+
+	return 1
+
 ### `undo`
 @auto_checkpoint
 def command_undo(db, args):
@@ -412,6 +430,19 @@ def main():
 		dest = 'format',
 		action = 'store_const',
 		const = 'long'
+	)
+
+	p = subparsers.add_parser(
+		'tag',
+		help = 'Add a given tag to a file',
+	)
+	p.add_argument('hash',
+		help = 'Hash of file to change',
+		metavar = 'HASH',
+	)
+	p.add_argument('tag',
+		help = 'Tag to add',
+		metavar = 'TAG',
 	)
 
 	p = subparsers.add_parser(

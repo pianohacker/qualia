@@ -66,6 +66,9 @@ def _parse_datetime(field, field_conf, text_value):
 def _parse_exact_text(field, field_conf, text_value):
 	return text_value.strip()
 
+def _parse_keyword(field, field_conf, text_value):
+	return ' '.join(text_value.strip().split())
+
 def _parse_number(field, field_conf, text_value):
 	try:
 		return float(text_value)
@@ -146,6 +149,7 @@ def format_editable_metadata(f):
 
 	return '\n'.join(result)
 
+# Formats a checkpoint into YAML.
 def format_yaml_checkpoint(checkpoint):
 	return '-\n' + textwrap.indent(
 		yaml.safe_dump(
@@ -155,8 +159,11 @@ def format_yaml_checkpoint(checkpoint):
 		'  '
 	)
 
+# Formats metadata into true YAML.
 def format_yaml_metadata(f):
 	return f.hash + ':\n' + textwrap.indent(
+		# Note; we mainly use `safe_dump` so that we know a later `safe_load` will work. In theory,
+		# all types we feed this function should be safe.
 		yaml.safe_dump(
 			{key: value for key, value in f.metadata.items() if key != 'hash'},
 			default_flow_style = False

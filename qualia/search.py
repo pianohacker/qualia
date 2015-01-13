@@ -104,9 +104,10 @@ class SearchDatabase:
 				if name not in self.configured_fields or field != self.configured_fields[name]:
 					raise common.FieldConfigChangedError(name)
 		else:
-			# or b) create a schema containing only the required field `'hash'`.
+			# or b) create a schema containing only the required fields `'hash'` and `'comments'`.
 			schema = fields.Schema()
 			schema.add('hash', self.configured_fields['hash'])
+			schema.add('comments', self.configured_fields['comments'])
 
 			self.index = index.create_in(base_path, schema)
 
