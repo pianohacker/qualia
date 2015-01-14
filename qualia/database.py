@@ -256,7 +256,7 @@ class Database:
 		self.searchdb.delete(f)
 
 		try:
-			self.rmdir(self.get_directory_for_hash(f.hash))
+			os.rmdir(self.get_directory_for_hash(f.hash))
 		except OSError:
 			pass
 

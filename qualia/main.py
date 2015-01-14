@@ -140,6 +140,19 @@ def command_exists(db, args):
 	except (common.AmbiguousHashError, common.FileDoesNotExistError):
 		return 1
 
+### `export`
+def command_export(db, args):
+	try:
+		# This is a smarmy way of saying `xor`.
+		if args.all == bool(args.hash):
+			error('must specify either --all or specific hashes to export (not both)')
+			return 1
+
+		conversion.export(db, args.output_file, None if args.all else args.hash, metadata_only = args.metadata_only)
+		return 0
+	except common.AmbiguousHashError: error('{}: ambiguous hash', e.args[0])
+	except common.FileDoesNotExistError as e: error('{}: does not exist', e.args[0])
+
 ### `field list`
 def subcommand_field_list(db, args):
 	for field in sorted(db.fields):
@@ -335,6 +348,29 @@ def main():
 	p.add_argument('hash',
 		help = 'hash of file to check for',
 		metavar = 'HASH',
+	)
+
+	p = subparsers.add_parser(
+		'export',
+		help = 'Export file contents/metadata',
+	)
+	p.add_argument('-a', '--all',
+		action = 'store_true',
+		help = 'Export all files',
+	)
+	p.add_argument('-m', '--metadata-only',
+		action = 'store_true',
+		help = 'Only export metadata, not file contents',
+	)
+	p.add_argument('-o', '--output-filename',
+		dest = 'output_file',
+		type = argparse.FileType('wb'),
+		help = 'Output filename (if not specified, defaults to ./YYYY-MM-DD-HH-MM-SS.qualia'
+	)
+	p.add_argument('hash',
+		help = 'Specific hashes to export',
+		metavar = 'HASH',
+		nargs = '*',
 	)
 
 	p = subparsers.add_parser(

@@ -22,6 +22,7 @@
 from . import common, config
 
 import datetime
+import io
 import os
 from os import path
 import parsedatetime
@@ -29,6 +30,7 @@ import pickle
 import pkg_resources
 import re
 import stat
+import tarfile
 import textwrap
 import time
 import yaml
@@ -171,6 +173,68 @@ def format_yaml_metadata(f):
 		'  '
 	)
 
+## Import/export
+# Qualia can import and export metadata/file contents in specially arranged tarballs.
+#
+# These tarballs have the following layout:
+#
+# * /
+#     * qualia_export.yaml - State file; marks this as a qualia export and holds version information.
+#     * metadata.yaml - Contains metadata for all exported files
+#     * files/ - File contents (if any)
+
+EXPORT_VERSION = 1
+
+def export(db, output_file, hashes, *, metadata_only = False):
+	# The default filename is just a timestamp with our special `.qualia` extension.
+	output_file = output_file or open(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S.qualia'), 'wb')
+
+	# Note: we do this early and with a list so we catch all missing/ambiguous hashes early.
+	files = db.all() if hashes is None else [db.get(hash) for hash in hashes]
+
+	# PAX format is used largely as future-proofing, as it apparently has better large file support.
+	with tarfile.open(fileobj = output_file, mode = 'w:bz2', format = tarfile.PAX_FORMAT) as out:
+		# We make sure to use the same timestamp for all operations, for consistency.
+		timestamp = datetime.datetime.now()
+		info = tarfile.TarInfo('qualia_export.yaml')
+		state = yaml.safe_dump({
+			'version': EXPORT_VERSION,
+			'metadata_only': metadata_only,
+			'timestamp': timestamp,
+		}).encode('utf-8')
+		info.mtime = timestamp.timestamp()
+		info.size = len(state)
+		out.addfile(info, io.BytesIO(state))
+
+		if not metadata_only:
+			info = tarfile.TarInfo('files')
+			info.mtime = timestamp.timestamp()
+			info.type = tarfile.DIRTYPE
+			out.addfile(info)
+
+		# This seems to be the easiest way to output encoded data to a `BytesIO`.
+		metadata_raw_out = io.BytesIO() 
+		metadata_out = io.TextIOWrapper(metadata_raw_out, encoding = 'utf-8')
+
+		for f in files:
+			metadata_out.write(format_yaml_metadata(f))
+
+			if not metadata_only:
+				info = tarfile.TarInfo('files/' + f.hash)
+				info.mtime = f.metadata.get('file-modified-at', timestamp).timestamp()
+				info.size = os.stat(db.get_filename(f)).st_size
+				out.addfile(info, open(db.get_filename(f), 'rb'))
+
+		metadata_out.flush()
+		info = tarfile.TarInfo('metadata.yaml')
+		info.mtime = timestamp.timestamp()
+		info.size = metadata_raw_out.tell()
+		metadata_raw_out.seek(0)
+		out.addfile(info, metadata_raw_out)
+
+## Automatic metadata
+# A good portion of the metadata for a given file is automatically generated from filesystem
+# attributes, media metadata, etc. Some of this is built in, and some of it comes from plugins.
 importers = None
 
 def _load_importers():

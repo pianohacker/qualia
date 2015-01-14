@@ -165,7 +165,7 @@ class SearchDatabase:
 	# Deletes all the metadata for the given file.
 	def delete(self, f):
 		writer = self.index.writer()
-		writer.delete_by_term('hash', hash)
+		writer.delete_by_term('hash', f.hash)
 		writer.commit()
 
 	# Saves the metadata for the given `File` to the database.
