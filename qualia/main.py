@@ -145,7 +145,7 @@ def command_export(db, args):
 	try:
 		# This is a smarmy way of saying `xor`.
 		if args.all == bool(args.hash):
-			error('must specify either --all or specific hashes to export (not both)')
+			error('must specify either --all or specific hashes to export (but not both)')
 			return 1
 
 		conversion.export(db, args.output_file, None if args.all else args.hash, metadata_only = args.metadata_only)
