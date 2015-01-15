@@ -17,14 +17,19 @@
 
 ## Imports
 from . import common, config, conversion, database
+from .lazy_import import lazy_import
 
+# While we import most modules lazily, some things are always needed.
 import argparse
-import collections
-import functools
-import os
-import tempfile
-import shutil
 import sys
+
+lazy_import(globals(), """
+	import collections
+	import functools
+	import os
+	import tempfile
+	import shutil
+""")
 
 ## Utility functions
 # A decorator that automatically places a checkpoint after its decorated function runs if it does

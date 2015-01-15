@@ -19,21 +19,24 @@
 # formats, text entered by the user or filesystem/embedded metadata.
 #
 ##Imports
+from .lazy_import import lazy_import
 from . import common, config
 
-import datetime
-import io
-import os
-from os import path
-import parsedatetime
-import pickle
-import pkg_resources
-import re
-import stat
-import tarfile
-import textwrap
-import time
-import yaml
+lazy_import(globals(), """
+	import datetime
+	import io
+	import os
+	from os import path
+	import parsedatetime
+	import pickle
+	import pkg_resources
+	import re
+	import stat
+	import tarfile
+	import textwrap
+	import time
+	import yaml
+""")
 
 ## Parsing
 # The functions below all are used to parse metadata entered by the user. `parse_metadata` is the

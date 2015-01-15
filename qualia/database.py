@@ -16,19 +16,21 @@
 # along with Qualia. If not, see <http://www.gnu.org/licenses/>.
 
 ## Imports
-
-import codecs
-import datetime
-import glob
-import hashlib
-import itertools
-import os
-from os import path
-import shutil
-import stat
-import string
-
+from .lazy_import import lazy_import
 from . import common, config, journal, search
+
+lazy_import(globals(), """
+	import codecs
+	import datetime
+	import glob
+	import hashlib
+	import itertools
+	import os
+	from os import path
+	import shutil
+	import stat
+	import string
+""")
 
 ## Constants
 # Each major database revision has a version number; we're currently only on version 1, but this

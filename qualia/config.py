@@ -16,10 +16,14 @@
 # along with Qualia. If not, see <http://www.gnu.org/licenses/>.
 
 ## Imports
-import copy
-import os
-from os import path
-import yaml
+from .lazy_import import lazy_import
+
+lazy_import(globals(), """
+	import copy
+	import os
+	from os import path
+	import yaml
+""")
 
 ## Utility functions
 # This returns the first of its arguments that are not `None` (if any).

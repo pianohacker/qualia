@@ -18,10 +18,13 @@
 # This is the implementation of the journal, which allows for recovery and limited undo.
 #
 ## Imports
-import base64
-import datetime
-import pickle
-import sqlite3
+from .lazy_import import lazy_import
+
+lazy_import(globals(), """
+	import datetime
+	import pickle
+	import sqlite3
+""")
 
 ## Journal
 # The journal is implemented on top of a simple SQLite database, which gives us a convenient
