@@ -98,7 +98,7 @@ class File:
 class Database:
 	def __init__(self, db_path, read_only = False):
 		self.db_path = db_path
-		self.read_only = False
+		self.read_only = read_only
 		self.init_if_needed()
 
 		# First, we load the DB state file...

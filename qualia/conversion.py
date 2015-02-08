@@ -235,6 +235,35 @@ def export(db, output_file, hashes, *, metadata_only = False):
 		metadata_raw_out.seek(0)
 		out.addfile(info, metadata_raw_out)
 
+def import_(db, input_file, *, renames = {}):
+	metadata = {}
+
+	with tarfile.open(fileobj = input_file, mode = 'r:*') as tarf:
+		info = tarf.next()
+		if info.name != 'qualia_export.yaml': raise RuntimeError('qualia_export.yaml must be first file in import')
+		export_info = yaml.safe_load(tarf.extractfile(info))
+		assert(export_info['version'] == 1)
+
+		for info in tarf:
+			if info.name == 'qualia_export.yaml':
+				continue
+			elif info.name == 'metadata.yaml':
+				metadata = yaml.safe_load(tarf.extractfile(info))
+			elif info.name.startswith('files/'):
+				try:
+					f = db.add_file(tarf.extractfile(info))
+					db.save(f)
+					print('imported {}'.format(f.short_hash))
+				except common.FileExistsError: print('{}: identical file in database, not added'.format(info.name))
+
+	for hash, md in metadata.items:
+		f = db.get(hash)
+		for key, value in metadata.items:
+			f.set_metadata(renames.get(key, key), value)
+		f.save()
+
+	db.checkpoint()
+
 ## Automatic metadata
 # A good portion of the metadata for a given file is automatically generated from filesystem
 # attributes, media metadata, etc. Some of this is built in, and some of it comes from plugins.

@@ -172,6 +172,10 @@ def command_find_hashes(db, args):
 	for hash in db.find_hashes(args.prefix):
 		print(hash)
 
+### `import`
+def command_import(db, args):
+	conversion.import_(db, args.file, renames = dict(args.rename))
+
 ### `log`
 def command_log(db, args):
 	for checkpoint in db.all_checkpoints(order = 'desc'):
@@ -256,6 +260,14 @@ class SubcommandHelpFormatter(argparse.RawDescriptionHelpFormatter):
 		if action.nargs == argparse.PARSER:
 			parts = "\n".join(parts.split("\n")[1:])
 		return parts
+
+def _mapping_argument_type(val):
+	parts = val.split('=')
+
+	if len(parts) != 2 or not all(parts):
+		raise argparse.ArgumentTypeError('should be of format FROM=TO')
+
+	return tuple(parts)
 
 ## Main
 def main():
@@ -411,6 +423,23 @@ def main():
 	p.add_argument('prefix',
 		help = 'prefix to hashes to look for',
 		metavar = 'PREFIX',
+	)
+
+	p = subparsers.add_parser(
+		'import',
+		help = 'Import a previous export',
+	)
+	p.add_argument('file',
+		help = 'Qualia export file',
+		metavar = 'FILE',
+		type = argparse.FileType('rb'),
+	)
+	p.add_argument('-r', '--rename',
+		help = 'Field rename on import, can specify multiple',
+		action = 'append',
+		dest = 'rename',
+		metavar = 'FROM=TO',
+		type = _mapping_argument_type,
 	)
 
 	p = subparsers.add_parser(
