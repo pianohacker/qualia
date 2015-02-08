@@ -28,6 +28,9 @@ class AmbiguousHashError(Exception):
 class CheckpointDoesNotExistError(Exception):
 	pass
 
+class DatabaseReadOnlyError(Exception):
+	pass
+
 # As the search library cannot change the type of a field after it is created, this is raised if the
 # configured type of a field does not match that in the search index schema.
 class FieldConfigChangedError(Exception):

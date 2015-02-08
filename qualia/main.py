@@ -21,6 +21,7 @@ from .lazy_import import lazy_import
 
 # While we import most modules lazily, some things are always needed.
 import argparse
+import pkg_resources
 import sys
 
 lazy_import(globals(), """
@@ -48,7 +49,10 @@ def auto_checkpoint(func):
 # Simple convenience function that outputs to `stderr` and automatically calls format with the given
 # message and args.
 def error(message, *args):
-	print(message.format(*args), file = sys.stderr)
+	if os.isatty(2):
+		print('\033[31m' + message.format(*args) + '\033[0m', file = sys.stderr)
+	else:
+		print(message.format(*args), file = sys.stderr)
 
 # Core function that outputs a view of the given file. Used by `search` and `show`.
 def show_file(db, f, args):
@@ -259,7 +263,7 @@ def main():
 	# somehow.
 	os.environ['COLUMNS'] = str(shutil.get_terminal_size().columns)
 
-	### Argument parsing
+	### Plugin loading/argument parsing
 	parser = argparse.ArgumentParser(
 		prog = 'qualia',
 		formatter_class = SubcommandHelpFormatter,
@@ -274,13 +278,19 @@ def main():
 		default = config.get_default_path()
 	)
 
-	### Commands
 	subparsers = parser.add_subparsers(
 		title = 'commands',
 		dest = 'command',
 		metavar = '<command>',
 	)
 
+	for ep in pkg_resources.iter_entry_points(group = 'qualia.plugins'):
+		ep.load()(
+			toplevel_parser = parser,
+			commands = subparsers,
+		)
+
+	### Commands
 	p = subparsers.add_parser(
 		'add',
 		aliases = ['take'],
@@ -512,8 +522,8 @@ def main():
 		error('error in configuration file: {}', ('{}: {}'.format(*e.args)) if e.args[0] else e.args[1])
 		sys.exit(1)
 	except common.FieldConfigChangedError as e:
-		error('Configuration for field `{}` changed or removed after adding it to files', e.args[0])
-		sys.exit(1)
+		error('Configuration for field `{}` changed or removed after adding it to files; database is read-only', e.args[0])
+		db = database.Database(db_path, read_only = True)
 
 	### Running command
 	# `args.command` should be limited to the defined subcommands, but there's not much risk here

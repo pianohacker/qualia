@@ -26,10 +26,14 @@ setup(
 		'console_scripts': [
 			'qualia = qualia.main:main',
 		],
+		'qualia.plugins': [
+			'image = qualia.plugins.image:register',
+			'magic = qualia.plugins.magic:register',
+		],
 		'qualia.auto_metadata_importers': [
 			'image = qualia.plugins.image:auto_add_image',
 			'magic = qualia.plugins.magic:auto_add_magic',
-		]
+		],
 	},
 
 	install_requires = [

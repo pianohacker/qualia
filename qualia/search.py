@@ -96,8 +96,9 @@ def _FieldAliasPlugin(map):
 # This DB serves two purposes in Qualia: it keeps an index of all the metadata contents to allow
 # for quick searching, and serves as an easy way to get the latest metadata for a given file.
 class SearchDatabase:
-	def __init__(self, db, base_path):
+	def __init__(self, db, base_path, read_only = False):
 		self.db = db
+		self.read_only = read_only
 
 		# First, load all the actually configured fields.
 		self.configured_fields = {field: _create_field_type(value) for field, value in self.db.fields.items()}
@@ -108,9 +109,10 @@ class SearchDatabase:
 			self.index = index.open_dir(base_path)
 
 			for name, field in self.index.schema.items():
-				if name not in self.configured_fields or field != self.configured_fields[name]:
+				if (name not in self.configured_fields or field != self.configured_fields[name]) and not read_only:
 					raise common.FieldConfigChangedError(name)
 		else:
+			if read_only: raise RuntimeError('Search index does not exist, cannot create in read_only mode')
 			# or b) create a schema containing only the required fields `'hash'` and `'comments'`.
 			schema = fields.Schema()
 			schema.add('hash', self.configured_fields['hash'])
@@ -125,9 +127,14 @@ class SearchDatabase:
 			for alias in value['aliases']:
 				self.field_alias_map[alias] = field
 
+	def _writer(self):
+		if self.read_only: raise common.DatabaseReadOnlyError()
+
+		return self.index.writer()
+
 	# Adds a new file to the database.
 	def add(self, hash):
-		writer = self.index.writer()
+		writer = self._writer()
 		# We use update_document, rather than add_document, so that this function can be mostly
 		# idempotent.
 		writer.update_document(hash = hash)
@@ -151,8 +158,8 @@ class SearchDatabase:
 		parser.add_plugin(qparser.GtLtPlugin())
 		# Parse * as a wildcard.
 		parser.add_plugin(qparser.WildcardPlugin())
-		# Reconfigure the named field plugin to support field names containing hyphens.
-		parser.replace_plugin(qparser.FieldsPlugin(expr=r"(?P<text>[\w-]+|[*]):", remove_unknown = False))
+		# Reconfigure the named field plugin to support field names containing hyphens and periods.
+		parser.replace_plugin(qparser.FieldsPlugin(expr=r"(?P<text>[\w.-]+|[*]):", remove_unknown = False))
 		# And finally add our field alias plugin.
 		parser.add_plugin(_FieldAliasPlugin(self.field_alias_map))
 
@@ -171,13 +178,13 @@ class SearchDatabase:
 
 	# Deletes all the metadata for the given file.
 	def delete(self, f):
-		writer = self.index.writer()
+		writer = self._writer()
 		writer.delete_by_term('hash', f.hash)
 		writer.commit()
 
 	# Saves the metadata for the given `File` to the database.
 	def save(self, f):
-		writer = self.index.writer()
+		writer = self._writer()
 
 		# We only add new fields when they are actually used, so they can be reconfigured up until
 		# that point.

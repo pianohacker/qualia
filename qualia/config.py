@@ -90,20 +90,27 @@ class Item:
 			# or b) inherits from the given type
 			raise ConstrainedError(path, 'must be a {}'.format(self.type.__name__))
 
+# This converts the Perl-style (key, value, key, value) argument list passed to the `DictItem`
+# classes into an actual hash. This is a bit unidiomatic, but means there isn't an awkward
+# transformation between the config keys seen here and those in the config file.
+def from_flat_hash(*args):
+	return dict(zip(args[::2], args[1::2]))
+
 # `DictItem`s represent mappings within the config hierarchy, and can contain default values for
-# given names underneath it and for any other name (under the key `-other`).
+# given names underneath it and for any other name (under the key `_other`).
 #
 # Values provided for these items are merged in recursively, with each child item controlling how
 # provided values are merged.
 class DictItem(Item):
-	# For convenience, keys are expected `separated_by_underscores` in the `kwargs` list but are
-	# converted to `separated-by-hyphens`. This is the form they are expected in in the config file.
-	def __init__(self, **kwargs):
-		super().__init__(dict, {key.replace('_', '-'): value for key, value in kwargs.items()})
+	def __init__(self, *args):
+		super().__init__(dict, args[0] if isinstance(args[0], dict) else from_flat_hash(*args))
 
 	# This magic method is given for convenience when merging part of a config hierarchy.
 	def __getitem__(self, key):
 		return self.default[key]
+
+	def __setitem__(self, key, value):
+		self.default[key] = value
 
 	def diff(self, value):
 		result = {}
@@ -111,8 +118,8 @@ class DictItem(Item):
 		for key in value:
 			if key in self.default:
 				diff = self.default[key].diff(value[key])
-			elif '-others' in self.default:
-				diff = self.default['-others'].diff(value[key])
+			elif '_others' in self.default:
+				diff = self.default['_others'].diff(value[key])
 			else:
 				diff = None
 
@@ -126,12 +133,12 @@ class DictItem(Item):
 		value = value or {}
 
 		for key in self.default:
-			if key == '-others': continue
+			if key == '_others': continue
 			result[key] = self.default[key].merge(start.get(key), value.get(key))
 		
 		if not known_only:
 			for key in set(value) - set(self.default):
-				result[key] = self.default['-others'].merge(start.get(key), value[key])
+				result[key] = self.default['_others'].merge(start.get(key), value[key])
 
 		return result
 
@@ -141,15 +148,15 @@ class DictItem(Item):
 		super().verify(path, value)
 
 		for key in self.default:
-			if key == '-others': continue
+			if key == '_others': continue
 			self.default[key].verify(key if path is None else (path + '.' + key), value.get(key))
 
 		extra_keys = set(value) - set(self.default)
 		if not extra_keys: return
 
-		if '-others' in self.default:
+		if '_others' in self.default:
 			for key in extra_keys:
-				self.default['-others'].verify(key if path is None else (path + '.' + key), value[key])
+				self.default['_others'].verify(key if path is None else (path + '.' + key), value[key])
 		else:
 			raise ConstrainedError(path, 'unexpected keys: {}'.format(', '.join(repr(x) for x in extra_keys)))
 
@@ -159,10 +166,10 @@ class DictItem(Item):
 # As a shortcut, if one provides something besides an `Item` subclass for a key, it is assumed that
 # one only wishes to change the default value for that key.
 class DerivedDictItem(DictItem):
-	def __init__(self, base, **kwargs):
+	def __init__(self, base, *args):
 		new_default = dict(base.default)
 
-		for key, item in kwargs.items():
+		for key, item in from_flat_hash(*args).items():
 			if isinstance(item, Item):
 				new_default[key] = item
 			else:
@@ -171,7 +178,7 @@ class DerivedDictItem(DictItem):
 
 				new_default[key] = new_item
 
-		super().__init__(**new_default)
+		super().__init__(new_default)
 
 # This subclass is used to create an item with a fixed type and value.
 class FixedItem(Item):
@@ -228,11 +235,11 @@ class NoVerifyItem(Item):
 
 ## Default config hierarchies
 # This is the base used for all of the `DerivedDictItem`s defined for the default metadata fields.
-_FIELD_ITEM = DictItem(
-	type = Item(set(['exact-text', 'text', 'id', 'number', 'keyword', 'datetime']), 'text'),
-	aliases = ListItem(Item(str, None), []),
-	read_only = Item(bool, False),
-	shown = Item(bool, True),
+FIELD_ITEM_BASE = DictItem(
+	'type', Item(set(['exact-text', 'text', 'id', 'number', 'keyword', 'datetime']), 'text'),
+	'aliases', ListItem(Item(str, None), []),
+	'read-only', Item(bool, False),
+	'shown', Item(bool, True),
 )
 
 # Each of the following bases represents the layout of their respective config files. For instance,
@@ -245,51 +252,39 @@ _FIELD_ITEM = DictItem(
 #
 # This particular base is for the user's global config file.
 CONF_BASE = DictItem(
-	database_path = PathItem(None),
-	fields = NoVerifyItem({}),
+	'database-path', PathItem(None),
+	'fields', NoVerifyItem({}),
 )
 
 # This base, on the other hand, is for the database state file, which is not intended to be edited
 # by the user.
 DB_STATE_BASE = DictItem(
-	version = Item(int, None),
+	'version', Item(int, None),
 	# There is a complicated song and dance done in `qualia.database` to make sure that any
 	# modifications the user has done to the metadata fields in their global config file are applied
 	# to the fields configuration but not saved back to the state file.
-	fields = DictItem(
-		hash = DerivedDictItem(_FIELD_ITEM,
-			type = FixedItem('id'),
-			read_only = FixedItem(True),
-			shown = Item(bool, False),
+	'fields', DictItem(
+		'hash', DerivedDictItem(FIELD_ITEM_BASE,
+			'type', FixedItem('id'),
+			'read-only', FixedItem(True),
+			'shown', Item(bool, False),
 		),
-		comments = DerivedDictItem(_FIELD_ITEM,
-			type = FixedItem('text'),
+		'comments', DerivedDictItem(FIELD_ITEM_BASE,
+			'type', FixedItem('text'),
 		),
-		file_modified_at = DerivedDictItem(_FIELD_ITEM,
-			type = FixedItem('datetime'),
+		'file-modified-at', DerivedDictItem(FIELD_ITEM_BASE,
+			'type', FixedItem('datetime'),
 		),
-		filename = DerivedDictItem(_FIELD_ITEM,
-			type = FixedItem('exact-text'),
+		'filename', DerivedDictItem(FIELD_ITEM_BASE,
+			'type', FixedItem('exact-text'),
 		),
-		imported_at = DerivedDictItem(_FIELD_ITEM,
-			type = FixedItem('datetime'),
+		'imported-at', DerivedDictItem(FIELD_ITEM_BASE,
+			'type', FixedItem('datetime'),
 		),
-		image_height = DerivedDictItem(_FIELD_ITEM,
-			type = FixedItem('number'),
-			aliases = ['height'],
+		'tags', DerivedDictItem(FIELD_ITEM_BASE,
+			'type', FixedItem('keyword'),
 		),
-		image_width = DerivedDictItem(_FIELD_ITEM,
-			type = FixedItem('number'),
-			aliases = ['width'],
-		),
-		magic_mime_type = DerivedDictItem(_FIELD_ITEM,
-			type = FixedItem('exact-text'),
-			aliases = ['mime'],
-		),
-		tags = DerivedDictItem(_FIELD_ITEM,
-			type = FixedItem('keyword'),
-		),
-		_others = _FIELD_ITEM,
+		'_others', FIELD_ITEM_BASE,
 	),
 )
 

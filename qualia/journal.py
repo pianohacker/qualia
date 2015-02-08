@@ -30,9 +30,10 @@ lazy_import(globals(), """
 # The journal is implemented on top of a simple SQLite database, which gives us a convenient
 # datastore and good disaster resilience.
 class Journal:
-	def __init__(self, filename):
+	def __init__(self, filename, read_only = False):
 		self.db = sqlite3.connect(
-			filename,
+			'file:' + filename + ('?mode=ro' if read_only else ''),
+			uri = True,
 			# This will use the column types (not much more than a hint to SQLite) to do conversion
 			# to and from Python types.
 			detect_types = sqlite3.PARSE_DECLTYPES

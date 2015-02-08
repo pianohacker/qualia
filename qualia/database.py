@@ -96,8 +96,9 @@ class File:
 # This is the core database class, and contains most code that operates directly on the set of
 # stored files as well as serving as an intermediary to the journal and search index.
 class Database:
-	def __init__(self, db_path):
+	def __init__(self, db_path, read_only = False):
 		self.db_path = db_path
+		self.read_only = False
 		self.init_if_needed()
 
 		# First, we load the DB state file...
@@ -115,19 +116,26 @@ class Database:
 		elif self.state['version'] != VERSION:
 			raise RuntimeError('Cannot open database of version {} (only support version {})'.format(self.state['version'], VERSION))
 
-		self.journal = journal.Journal(path.join(self.db_path, 'journal'))
-		self.searchdb = search.SearchDatabase(self, path.join(self.db_path, 'search'))
+		self.journal = journal.Journal(path.join(self.db_path, 'journal'), read_only = read_only)
+		self.searchdb = search.SearchDatabase(self, path.join(self.db_path, 'search'), read_only = read_only)
 
 	# This should be called once the UI is done with the database.
 	#
 	# Currently, this only saves the `state`, as the journal and search index are only kept open for
 	# long enough to make changes.
 	def close(self):
-		config.save(os.path.join(self.db_path, 'state'), self.state, config.DB_STATE_BASE)
+		if not self.read_only:
+			config.save(os.path.join(self.db_path, 'state'), self.state, config.DB_STATE_BASE)
+	
+	# Internal convenience function to raise an error if database is read-only.
+	def _require_read_write(self):
+		if self.read_only: raise common.DatabaseReadOnlyError()
 
 	# Just a utility method for `__init__`.
 	def init_if_needed(self):
 		if not path.exists(self.db_path):
+			if self.read_only: raise RuntimeError('Database does not exist, cannot create in read_only mode')
+
 			os.mkdir(self.db_path)
 			os.mkdir(path.join(self.db_path, 'files'))
 			os.mkdir(path.join(self.db_path, 'search'))
@@ -141,6 +149,8 @@ class Database:
 	
 	### Manipulation
 	def add_file(self, source_file, move = False, source = 'user'):
+		self._require_read_write()
+
 		# First, we have to get the actual hash of the source file, then seek it back to the
 		# beginning so it will be correctly copied later.
 		hash = hashlib.sha512(source_file.read()).hexdigest()
@@ -188,6 +198,8 @@ class Database:
 	# By default, it does not do so for automatically-added metadata, assuming that it will be
 	# automatically added with equal or better quality.
 	def restore_metadata(self, f, no_auto = True):
+		self._require_read_write()
+
 		modifications = {}
 
 		# To save a little bit of thrashing, we go through the transactions (implicitly assumed to
@@ -253,6 +265,8 @@ class Database:
 
 	# Deletes both the underlying file and metadata for a given file.
 	def delete(self, f, source = 'user'):
+		self._require_read_write()
+
 		self.journal.append(source, f.hash, 'delete')
 		os.unlink(self.get_filename_for_hash(f.hash))
 		self.searchdb.delete(f)
@@ -264,6 +278,8 @@ class Database:
 
 	# Saves all the metadata for a given file.
 	def save(self, f):
+		self._require_read_write()
+
 		t = datetime.datetime.now()
 		for source, field, old_value, value in f.modifications:
 			self.journal.append(source, f.hash, 'set', field, old_value, value, time = t)
@@ -285,6 +301,8 @@ class Database:
 
 	# Undo a given checkpoint (can be `None` to undo the latest).
 	def undo(self, checkpoint_id):
+		self._require_read_write()
+
 		# We can currently only undo `add`s and `set`s; `delete`s are impossible by definition.
 		CAN_UNDO = set(['add', 'set'])
 
