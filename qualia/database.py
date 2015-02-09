@@ -30,6 +30,7 @@ lazy_import(globals(), """
 	import shutil
 	import stat
 	import string
+	import tempfile
 """)
 
 ## Constants
@@ -151,33 +152,59 @@ class Database:
 	def add_file(self, source_file, move = False, source = 'user'):
 		self._require_read_write()
 
-		# First, we have to get the actual hash of the source file, then seek it back to the
-		# beginning so it will be correctly copied later.
-		hash = hashlib.sha512(source_file.read()).hexdigest()
-		source_file.seek(0)
+		def _prepare_filename(hash):
+			# While `makedirs` isn't strictly necessary in the current arrangement, it is useful
+			# future-proofing for a more deeply nested storage structure.
+			os.makedirs(self.get_directory_for_hash(hash), exist_ok = True)
+			filename = self.get_filename_for_hash(hash)
 
-		# While `makedirs` isn't strictly necessary in the current arrangement, it is useful
-		# future-proofing for a more deeply nested storage structure.
-		os.makedirs(self.get_directory_for_hash(hash), exist_ok = True)
-		filename = self.get_filename_for_hash(hash)
+			if path.exists(filename):
+				raise common.FileExistsError(hash)
 
-		if path.exists(filename):
-			raise common.FileExistsError(hash)
+			return filename
 
-		self.journal.append(source, hash, 'add')
-
-		self.searchdb.add(hash)
+		copy = not move
 
 		if move:
 			try:
+				hash = hashlib.sha512(source_file.read()).hexdigest()
+				filename = _prepare_filename(hash)
 				os.rename(source_file.name, filename)
 			except OSError:
-				shutil.copyfileobj(source_file, open(filename, 'wb'))
+				copy = True
+
+		# While technically, we could just grab the hash, seek to the beginning of the file, then
+		# copy the file, we do it this more complicated way for two reasons:
+		#
+		#   1. It's more efficient (though not by much on an SSD).
+		#   2. Adding files from a compressed import tarball is abysmallly slow if you seek.
+		#
+		if copy:
+			hashobj = hashlib.sha512()
+
+			try:
+				tmp_file = tempfile.NamedTemporaryFile(dir = path.join(self.db_path, 'files'), delete = False)
+				chunk = source_file.read(16384)
+				while chunk:
+					hashobj.update(chunk)
+					tmp_file.write(chunk)
+					chunk = source_file.read(16384)
+
+				tmp_file.flush()
+				hash = hashobj.hexdigest()
+				filename = _prepare_filename(hash)
+				os.rename(tmp_file.name, filename)
+			except:
+				# We have to do this manually, as we don't want the file to be deleted if we succeed
+				# and it gets renamed.
+				os.unlink(tmp_file.name)
+				raise
+
+			if move:
 				os.unlink(source_file.name)
-		else:
-			# We can't be clever and use a hard link, as the source file can be externally modified,
-			# thus invalidating the hash.
-			shutil.copyfileobj(source_file, open(filename, 'wb'))
+
+		self.journal.append(source, hash, 'add')
+		self.searchdb.add(hash)
 
 		# This is apparently the required song and dance to get the current umask.
 		old_umask = os.umask(0)

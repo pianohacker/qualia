@@ -235,7 +235,18 @@ def export(db, output_file, hashes, *, metadata_only = False):
 		metadata_raw_out.seek(0)
 		out.addfile(info, metadata_raw_out)
 
-def import_(db, input_file, *, renames = {}):
+# This import routine is missing a lot of error handling:
+#
+#   * No checks to see if the import file is actually a tarball.
+#   * No check to see if `qualia_export.yaml` is actually YAML.
+#
+# It also has some low-hanging fruit for improvement:
+#
+#   * Convert the whole shebang to a ZIP. UNIX love aside, being able to ignore the ordering of
+#     `qualia_export.yaml` and `metadata.yaml` would be a blessing, especially as it would allow us
+#     to...
+#   * Load the metadata *first*, and then add it to each incoming file as it came in.
+def import_(db, input_file, *, renames = {}, trust_hash = False):
 	metadata = {}
 
 	with tarfile.open(fileobj = input_file, mode = 'r:*') as tarf:
@@ -256,11 +267,11 @@ def import_(db, input_file, *, renames = {}):
 					print('imported {}'.format(f.short_hash))
 				except common.FileExistsError: print('{}: identical file in database, not added'.format(info.name))
 
-	for hash, md in metadata.items:
+	for hash, md in metadata.items():
 		f = db.get(hash)
-		for key, value in metadata.items:
+		for key, value in md.items():
 			f.set_metadata(renames.get(key, key), value)
-		f.save()
+		db.save(f)
 
 	db.checkpoint()
 
