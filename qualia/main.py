@@ -174,7 +174,7 @@ def command_find_hashes(db, args):
 
 ### `import`
 def command_import(db, args):
-	conversion.import_(db, args.file, renames = dict(args.rename))
+	conversion.import_(db, args.file, renames = dict(args.rename or []))
 
 ### `log`
 def command_log(db, args):

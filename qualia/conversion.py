@@ -232,38 +232,26 @@ def export(db, output_file, hashes, *, metadata_only = False):
 #   * No checks to see if the import file is actually a tarball.
 #   * No check to see if `qualia_export.yaml` is actually YAML.
 #
-# It also has some low-hanging fruit for improvement:
-#
-#   * Convert the whole shebang to a ZIP. UNIX love aside, being able to ignore the ordering of
-#     `qualia_export.yaml` and `metadata.yaml` would be a blessing, especially as it would allow us
-#     to...
-#   * Load the metadata *first*, and then add it to each incoming file as it came in.
 def import_(db, input_file, *, renames = {}, trust_hash = False):
 	metadata = {}
 
-	with tarfile.open(fileobj = input_file, mode = 'r:*') as tarf:
-		info = tarf.next()
-		if info.name != 'qualia_export.yaml': raise RuntimeError('qualia_export.yaml must be first file in import')
-		export_info = yaml.safe_load(tarf.extractfile(info))
+	with zipfile.ZipFile(file = input_file, mode = 'r') as zipf:
+		export_info = yaml.safe_load(zipf.open('qualia_export.yaml'))
 		assert(export_info['version'] == 1)
 
-		for info in tarf:
-			if info.name == 'qualia_export.yaml':
+		metadata = yaml.safe_load(zipf.open('metadata.yaml'))
+
+		for info in zipf.infolist():
+			if info.filename in ('qualia_export.yaml', 'metadata.yaml'):
 				continue
-			elif info.name == 'metadata.yaml':
-				metadata = yaml.safe_load(tarf.extractfile(info))
-			elif info.name.startswith('files/'):
+			elif info.filename.startswith('files/') and info.filename[-1] != '/':
 				try:
-					f = db.add_file(tarf.extractfile(info))
+					f = db.add_file(zipf.open(info))
+					for key, value in metadata.get(f.hash, {}).items():
+						f.set_metadata(renames.get(key, key), value)
 					db.save(f)
 					print('imported {}'.format(f.short_hash))
-				except common.FileExistsError: print('{}: identical file in database, not added'.format(info.name))
-
-	for hash, md in metadata.items():
-		f = db.get(hash)
-		for key, value in md.items():
-			f.set_metadata(renames.get(key, key), value)
-		db.save(f)
+				except common.FileExistsError: print('{}: identical file in database, not added'.format(info.filename))
 
 	db.checkpoint()
 
