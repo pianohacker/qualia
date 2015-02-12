@@ -32,10 +32,10 @@ lazy_import(globals(), """
 	import pkg_resources
 	import re
 	import stat
-	import tarfile
 	import textwrap
 	import time
 	import yaml
+	import zipfile
 """)
 
 ## Parsing
@@ -177,14 +177,15 @@ def format_yaml_metadata(f):
 	)
 
 ## Import/export
-# Qualia can import and export metadata/file contents in specially arranged tarballs.
+# Qualia can import and export metadata/file contents in specially arranged ZIPs.
 #
-# These tarballs have the following layout:
+# These ZIPs have the following layout:
 #
 # * /
-#     * qualia_export.yaml - State file; marks this as a qualia export and holds version information.
+#     * qualia_export.yaml - State file; marks this as a qualia export and holds version information
 #     * metadata.yaml - Contains metadata for all exported files
-#     * files/ - File contents (if any)
+#     * files/ - Unless `metadata_only` set in `qualia_export.yaml`
+#         * ... - Contents of files, stored under their full hash
 
 EXPORT_VERSION = 1
 
@@ -195,25 +196,21 @@ def export(db, output_file, hashes, *, metadata_only = False):
 	# Note: we do this early and with a list so we catch all missing/ambiguous hashes early.
 	files = db.all() if hashes is None else [db.get(hash) for hash in hashes]
 
-	# PAX format is used largely as future-proofing, as it apparently has better large file support.
-	with tarfile.open(fileobj = output_file, mode = 'w:bz2', format = tarfile.PAX_FORMAT) as out:
+	with zipfile.ZipFile(file = output_file, mode = 'w', compression = zipfile.ZIP_DEFLATED, allowZip64 = True) as out:
 		# We make sure to use the same timestamp for all operations, for consistency.
-		timestamp = datetime.datetime.now()
-		info = tarfile.TarInfo('qualia_export.yaml')
+		# This trick with slicing localtime is from the `zipfile` module.
+		timestamp = time.localtime()[:6]
+		info = zipfile.ZipInfo('qualia_export.yaml', timestamp)
 		state = yaml.safe_dump({
 			'version': EXPORT_VERSION,
 			'metadata_only': metadata_only,
 			'timestamp': timestamp,
 		}).encode('utf-8')
-		info.mtime = timestamp.timestamp()
-		info.size = len(state)
-		out.addfile(info, io.BytesIO(state))
+		info.compress_type = zipfile.ZIP_DEFLATED
+		out.writestr(info, state)
 
 		if not metadata_only:
-			info = tarfile.TarInfo('files')
-			info.mtime = timestamp.timestamp()
-			info.type = tarfile.DIRTYPE
-			out.addfile(info)
+			out.writestr('files/', '')
 
 		# This seems to be the easiest way to output encoded data to a `BytesIO`.
 		metadata_raw_out = io.BytesIO() 
@@ -223,17 +220,12 @@ def export(db, output_file, hashes, *, metadata_only = False):
 			metadata_out.write(format_yaml_metadata(f))
 
 			if not metadata_only:
-				info = tarfile.TarInfo('files/' + f.hash)
-				info.mtime = f.metadata.get('file-modified-at', timestamp).timestamp()
-				info.size = os.stat(db.get_filename(f)).st_size
-				out.addfile(info, open(db.get_filename(f), 'rb'))
+				out.write(db.get_filename(f), 'files/' + f.hash)
 
 		metadata_out.flush()
-		info = tarfile.TarInfo('metadata.yaml')
-		info.mtime = timestamp.timestamp()
-		info.size = metadata_raw_out.tell()
-		metadata_raw_out.seek(0)
-		out.addfile(info, metadata_raw_out)
+		info = zipfile.ZipInfo('metadata.yaml', timestamp)
+		info.compress_type = zipfile.ZIP_DEFLATED
+		out.writestr(info, metadata_raw_out.getvalue())
 
 # This import routine is missing a lot of error handling:
 #
