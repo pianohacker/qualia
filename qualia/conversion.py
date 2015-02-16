@@ -253,7 +253,7 @@ def import_(db, input_file, *, renames = {}, trust_hash = False):
 					print('imported {}'.format(f.short_hash))
 				except common.FileExistsError: print('{}: identical file in database, not added'.format(info.filename))
 
-	db.checkpoint()
+	db.commit()
 
 ## Automatic metadata
 # A good portion of the metadata for a given file is automatically generated from filesystem

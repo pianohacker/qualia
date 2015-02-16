@@ -153,13 +153,13 @@ class Database:
 		self._require_read_write()
 
 		def _prepare_filename(hash):
+			if self.exists(hash):
+				raise common.FileExistsError(hash)
+
 			# While `makedirs` isn't strictly necessary in the current arrangement, it is useful
 			# future-proofing for a more deeply nested storage structure.
 			os.makedirs(self.get_directory_for_hash(hash), exist_ok = True)
 			filename = self.get_filename_for_hash(hash)
-
-			if path.exists(filename):
-				raise common.FileExistsError(hash)
 
 			return filename
 
@@ -245,10 +245,7 @@ class Database:
 	def find_hashes(self, prefix):
 		prefix = _validate_hash(prefix)
 
-		# Note: this is a bit of a hack. Here be dragons.
-		# TODO: Remove dragons
-		for filename in glob.iglob(self.get_filename_for_hash(prefix + '*')):
-			yield path.basename(filename)
+		return self.searchdb.find_hashes(prefix)
 	
 	# This gets the shortest unambiguous shortened version of the given hash.
 	def get_shortest_hash(self, hash):
@@ -273,9 +270,8 @@ class Database:
 
 	# Returns a generator giving all the file objects that exist in the database.
 	def all(self):
-		for dir in sorted(os.listdir(path.join(self.db_path, 'files'))):
-			for hash in sorted(os.listdir(path.join(self.db_path, 'files', dir))):
-				yield File(self, hash, self.searchdb.get(hash))
+		for metadata in self.searchdb.all():
+			yield File(self, metadata['hash'], metadata)
 
 	# Gets the `File` object for a given short hash.
 	def get(self, short_hash):
@@ -291,6 +287,10 @@ class Database:
 		return File(self, hash, self.searchdb.get(hash))
 
 	# Deletes both the underlying file and metadata for a given file.
+	#
+	# TODO: Make this atomic; currently, if a user deletes a set of files and it fails halfway
+	# through, the search database and journal will be consistent but some of the actual files will
+	# be deleted. This will likely require postponing the actual unlink until some kind of GC phase.
 	def delete(self, f, source = 'user'):
 		self._require_read_write()
 
@@ -323,8 +323,10 @@ class Database:
 			yield File(self, result['hash'], result)
 
 	# Set a checkpoint, grouping together a set of individual transactions as a single operation.
-	def checkpoint(self):
-		return self.journal.checkpoint()
+	def commit(self):
+		self.searchdb.commit()
+
+		return self.journal.commit()
 
 	# Undo a given checkpoint (can be `None` to undo the latest).
 	def undo(self, checkpoint_id):
@@ -360,3 +362,8 @@ class Database:
 	def all_checkpoints(self, *, order = 'asc'):
 		for checkpoint_id in self.journal.all_checkpoint_ids(order = order):
 			yield self.journal.get_checkpoint(checkpoint_id)
+
+	# Check to see whether a file exists. We do this using the searchdb rather than the existing
+	# files because the searchdb is more likely to be internally consistent.
+	def exists(self, hash):
+		return self.searchdb.exists(hash)

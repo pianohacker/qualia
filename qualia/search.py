@@ -21,7 +21,8 @@ from . import config, common
 
 lazy_import(globals(), """
 	import copy
-	from whoosh import analysis, fields, index, qparser, query
+	import sys
+	from whoosh import analysis, fields, index, qparser, query, writing
 """)
 
 ## Utility functions
@@ -120,6 +121,8 @@ class SearchDatabase:
 
 			self.index = index.create_in(base_path, schema)
 
+		self._open_writer = None
+
 		# Finally, we create the alias map for the parser plugin above.
 		self.field_alias_map = {}
 
@@ -130,7 +133,27 @@ class SearchDatabase:
 	def _writer(self):
 		if self.read_only: raise common.DatabaseReadOnlyError()
 
-		return self.index.writer()
+		if not self._open_writer: 
+			# This is a kind of terrible hack to give us roughly-atomic checkpoints.
+			self._open_writer = writing.BufferedWriter(self.index, limit = sys.maxsize, period = None)
+
+		return self._open_writer
+
+	def _searcher(self):
+		if self._open_writer: 
+			return self._open_writer.searcher()
+		else:
+			return self.index.searcher()
+
+	def _schema(self):
+		if self._open_writer: 
+			return self._open_writer.schema
+		else:
+			return self.index.schema
+
+	# Flushes all pending index changes.
+	def commit(self):
+		if self._open_writer: self._open_writer.commit()
 
 	# Adds a new file to the database.
 	def add(self, hash):
@@ -138,22 +161,33 @@ class SearchDatabase:
 		# We use update_document, rather than add_document, so that this function can be mostly
 		# idempotent.
 		writer.update_document(hash = hash)
-		writer.commit()
+
+	# Returns all files in the database.
+	def all(self):
+		with self._searcher() as searcher:
+			for _, metadata in searcher.iter_docs():
+				yield metadata
 
 	# Gets a `dict` of all the metadata for the given file.
 	def get(self, hash):
-		q = query.Term('hash', hash)
+		with self._searcher() as searcher:
+			return searcher.document(hash = hash)
 
-		with self.index.searcher() as searcher:
-			results = searcher.search(q, limit = 1)
-			result = dict(results[0]) if len(results) == 1 else {}
+	# Find whether the given document exists.
+	def exists(self, hash):
+		with self._searcher() as searcher:
+			return bool(searcher.document_number(hash = hash))
 
-		return result
+	# Find all hashes starting with the given prefix.
+	def find_hashes(self, prefix):
+		with self._searcher() as searcher:
+			for docnum in searcher.docs_for_query(query.Prefix('hash', prefix)):
+				yield searcher.stored_fields(docnum)['hash']
 
 	# Internal utility method to parse the given search query.
 	def _parse_query(self, query):
 		# We default to searching the comments field if no explicit field is given.
-		parser = qparser.QueryParser('comments', self.index.schema)
+		parser = qparser.QueryParser('comments', self._schema())
 		# Add support for using >, <, <=, etc. in numeric/timestamp fields.
 		parser.add_plugin(qparser.GtLtPlugin())
 		# Parse * as a wildcard.
@@ -170,7 +204,7 @@ class SearchDatabase:
 		q = self._parse_query(query_text)
 
 		# As this `with` holds the search index open, this iterator should be read to completion.
-		with self.index.searcher() as searcher:
+		with self._searcher() as searcher:
 			results = searcher.search(q, limit = limit)
 
 			for result in results:
@@ -180,7 +214,6 @@ class SearchDatabase:
 	def delete(self, f):
 		writer = self._writer()
 		writer.delete_by_term('hash', f.hash)
-		writer.commit()
 
 	# Saves the metadata for the given `File` to the database.
 	def save(self, f):
@@ -189,11 +222,10 @@ class SearchDatabase:
 		# We only add new fields when they are actually used, so they can be reconfigured up until
 		# that point.
 		for field in f.metadata:
-			if field not in self.index.schema.names():
+			if field not in self._schema().names():
 				if field not in self.configured_fields:
 					raise common.FieldDoesNotExistError(field)
 
 				writer.add_field(field, self.configured_fields[field])
 
 		writer.update_document(**f.metadata)
-		writer.commit()

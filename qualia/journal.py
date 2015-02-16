@@ -91,7 +91,6 @@ class Journal:
 			''',
 			(time or datetime.datetime.now(), source, file, op, pickle.dumps(args))
 		)
-		self.db.commit()
 		self.has_changes = True
 
 	# Returns all matching transactions for a given file and op.
@@ -116,7 +115,7 @@ class Journal:
 	#
 	# If no transactions have been done since the last checkpoint, no checkpoint will be created and
 	# this method will return `None`.
-	def checkpoint(self, time = None):
+	def commit(self, time = None):
 		if not self.has_changes: return None
 
 		cur = self.db.cursor()

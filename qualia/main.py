@@ -40,7 +40,7 @@ def auto_checkpoint(func):
 	def wrapper(db, args):
 		result = func(db, args) or 0
 
-		if result == 0: db.checkpoint()
+		if result == 0: db.commit()
 
 		return result
 
