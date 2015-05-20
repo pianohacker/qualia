@@ -1,6 +1,6 @@
 # Qualia
 
-Qualia is a command-line file-storage tool to manage a repository of files with rich, searchable
+Qualia is a command-line tool to manage a repository of files with rich, searchable
 metadata.
 
 Notable features:
