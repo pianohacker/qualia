@@ -72,7 +72,118 @@ def show_file(db, f, args):
 OUTPUT_FORMATS = ['filename', 'short_hash', 'hash', 'long']
 
 ## Commands
+### Base implementation
+def _mapping_argument_type(val):
+	parts = val.split('=')
+
+	if len(parts) != 2 or not all(parts):
+		raise argparse.ArgumentTypeError('should be of format FROM=TO')
+
+	return tuple(parts)
+
+# This class holds the details for each possible argument to the command.
+class Argument:
+	def __init__(self, name, *args, **kwargs):
+		# While the class is largely a wrapper around `add_argument`, we do some preprocessing for
+		# convenience's sake.
+		if not name.startswith('-'):
+			kwargs['metavar'] = name.upper()
+
+		self.name = name
+		self.args = args
+		self.kwargs = kwargs
+	
+	# This adds the given argument to the command's subparser.
+	def add_to_subparser(self, subparser):
+		subparser.add_argument(
+			self.name,
+			*self.args,
+			**self.kwargs
+		)
+
+# Holds the information and arguments for a given command.
+class Command:
+	def __init__(self, func, name, help, *arguments, **kwargs):
+		self.func = func
+		self.name = name
+		self.help = help
+		self.arguments = arguments
+		self.kwargs = kwargs
+
+		Command.known_commands = {}
+	
+	def add_to_parser(self, subparsers):
+		p = subparsers.add_parser(
+			self.name,
+			help = self.help,
+			**self.kwargs
+		)
+		
+		for argument in self.arguments:
+			argument.add_to_subparser(p)
+
+		return p
+
+# A command that encapsulates other commands (like `qualia dump journal`).
+class WrapperCommand(Command):
+	def __init__(self, *args, **kwargs):
+		super().__init__(None, *args, **kwargs)
+
+		self.subcommands = {}
+
+	def add_subcommand(self, name, *args, **kwargs):
+		def decorator(func):
+			cmd = Command(func, name, *args, **kwargs)
+			self.subcommands[name] = cmd
+
+			return cmd
+		
+		return decorator
+
+	def add_to_parser(self, subparsers):
+		p = super().add_to_parser(subparsers)
+
+		command_subparsers = p.add_subparsers(
+			title = 'subcommands',
+			dest = 'subcommand',
+			metavar = '<subcommand>',
+		)
+		
+		for _, subcommand in sorted(self.subcommands.items()):
+			subcommand.add_to_parser(command_subparsers)
+
+known_commands = {}
+def add_command(name, *args, **kwargs):
+	def decorator(func):
+		cmd = Command(func, name, *args, **kwargs)
+		known_commands[name] = cmd
+
+		return cmd
+	
+	return decorator
+
+def add_wrapper(name, *args, **kwargs):
+	cmd = WrapperCommand(name, *args, **kwargs)
+	known_commands[name] = cmd
+
+	return cmd
+
+### Common arguments
+
 ### `add`/`take`
+@add_command('add',
+	'add an external file to the DB (use \'take\' to move instead of copying)',
+	Argument('--restore',
+		action = 'store_true',
+		help = 'Restore previous metadata for this file',
+	),
+	Argument('file',
+		help = 'External file(s) to add',
+		nargs = '+',
+		type = argparse.FileType('rb'),
+	),
+	aliases = ['take'],
+)
 @auto_checkpoint
 def command_add(db, args):
 	for sf in args.file:
@@ -85,6 +196,14 @@ def command_add(db, args):
 		except common.FileExistsError: error('{}: identical file in database, not added', sf.name)
 
 ### `delete`/`rm`
+@add_command('delete',
+	'Delete a file',
+	Argument('hash',
+		help = 'Hashes of file(s) to delete',
+		nargs = '+',
+	),
+	aliases = ['rm'],
+)
 @auto_checkpoint
 def command_delete(db, args):
 	for hash in args.hash:
@@ -92,17 +211,46 @@ def command_delete(db, args):
 			db.delete(db.get(hash))
 		except common.FileDoesNotExistError: error('{}: does not exist', hash)
 
-### `dump metadata`
+### `dump`
+wrapper_dump = add_wrapper(
+	'dump',
+	'Dump raw information from the database',
+)
+
+#### `dump journal`
+@wrapper_dump.add_subcommand(
+	'journal',
+	'Dump all checkpoints in YAML format',
+)
 def subcommand_dump_journal(db, args):
 	for checkpoint in db.all_checkpoints():
 		print(conversion.format_yaml_checkpoint(checkpoint))
 
-### `dump metadata`
+#### `dump metadata`
+@wrapper_dump.add_subcommand(
+	'metadata',
+	'Dump metadata for all files in YAML format',
+)
 def subcommand_dump_metadata(db, args):
 	for f in db.all():
 		print(conversion.format_yaml_metadata(f))
 
 ### `edit`
+@add_command(
+	'edit',
+	'Edit all of the metadata of a given file',
+	Argument('hash',
+		help = 'hash of file to edit',
+	),
+	Argument('-n', '--dry-run',
+		help = 'Don\'t save edits to database',
+		action = 'store_true',
+	),
+	Argument('-v', '--verbose',
+		action = 'store_true',
+		help = 'Show changes to metadata',
+	),
+)
 @auto_checkpoint
 def command_edit(db, args):
 	try:
@@ -141,6 +289,13 @@ def command_edit(db, args):
 	except common.InvalidFieldValue as e: error('invalid value "{}" for field {}', e.args[1], e.args[0])
 
 ### `exists`
+@add_command(
+	'exists',
+	'Check whether a file exists and set exit status accordingly',
+	Argument('hash',
+		help = 'hash of file to check for',
+	),
+)
 def command_exists(db, args):
 	try:
 		db.get(args.hash)
@@ -150,9 +305,29 @@ def command_exists(db, args):
 		return 1
 
 ### `export`
+@add_command(
+	'export',
+	'Export file contents/metadata',
+	Argument('-a', '--all',
+		action = 'store_true',
+		help = 'Export all files',
+	),
+	Argument('-m', '--metadata-only',
+		action = 'store_true',
+		help = 'Only export metadata, not file contents',
+	),
+	Argument('-o', '--output-filename',
+		dest = 'output_file',
+		type = argparse.FileType('wb'),
+		help = 'Output filename (if not specified, defaults to ./YYYY-MM-DD-HH-MM-SS.qualia'
+	),
+	Argument('hash',
+		help = 'Specific hashes to export',
+		nargs = '*',
+	),
+)
 def command_export(db, args):
 	try:
-		# This is a smarmy way of saying `xor`.
 		if args.all == bool(args.hash):
 			error('must specify either --all or specific hashes to export (but not both)')
 			return 1
@@ -162,21 +337,57 @@ def command_export(db, args):
 	except common.AmbiguousHashError: error('{}: ambiguous hash', e.args[0])
 	except common.FileDoesNotExistError as e: error('{}: does not exist', e.args[0])
 
-### `field list`
+### `field`
+wrapper_field = add_wrapper(
+	'field',
+	'Change available fields',
+)
+
+#### `field list`
+@wrapper_field.add_subcommand(
+	'list',
+	'List available fields',
+)
 def subcommand_field_list(db, args):
 	for field in sorted(db.fields):
 		print(field)
 
 ### `find-hashes`
+@add_command(
+	'find-hashes',
+	'Print all hashes starting with PREFIX',
+	Argument('prefix',
+		help = 'prefix to hashes to look for',
+	),
+)
 def command_find_hashes(db, args):
 	for hash in db.find_hashes(args.prefix):
 		print(hash)
 
 ### `import`
+@add_command(
+	'import',
+	'Import a previous export',
+	Argument('file',
+		help = 'Qualia export file',
+		type = argparse.FileType('rb'),
+	),
+	Argument('-r', '--rename',
+		help = 'Field rename on import, can specify multiple',
+		action = 'append',
+		dest = 'rename',
+		metavar = 'FROM=TO',
+		type = _mapping_argument_type,
+	),
+)
 def command_import(db, args):
 	conversion.import_(db, args.file, renames = dict(args.rename or []))
 
 ### `log`
+@add_command(
+	'log',
+	'Print modifications to the database',
+)
 def command_log(db, args):
 	for checkpoint in db.all_checkpoints(order = 'desc'):
 		print('#{}: '.format(checkpoint['checkpoint_id']), end = '')
@@ -189,11 +400,48 @@ def command_log(db, args):
 		print(', '.join('{} "{}"'.format(types[t], t) for t in sorted(types.keys())))
 
 ### `search`
+@add_command(
+	'search',
+	'Search files by metadata',
+	Argument('query',
+		nargs = '+'
+	),
+	Argument('-f', '--format',
+		help = 'Output format',
+		dest = 'format',
+		choices = OUTPUT_FORMATS,
+		default = 'short_hash',
+	),
+	Argument('-l', '--long',
+		help = 'Show metadata (default no)',
+		dest = 'format',
+		action = 'store_const',
+		const = 'long'
+	),
+	Argument('-n', '--limit',
+		help = 'Number of results to show',
+		type = int,
+		default = 10
+	),
+)
 def command_search(db, args):
 	for result in db.search(' '.join(args.query), limit = args.limit):
 		show_file(db, result, args)
 
 ### `set`
+@add_command(
+	'set',
+	'Set metadata for a given file',
+	Argument('hash',
+		help = 'Hash of file to change',
+	),
+	Argument('field',
+		help = 'Metadata field',
+	),
+	Argument('value',
+		help = 'Metadata value',
+	),
+)
 @auto_checkpoint
 def command_set(db, args):
 	try:
@@ -211,6 +459,26 @@ def command_set(db, args):
 	return 1
 
 ### `show`
+@add_command(
+	'show',
+	'Show metadata for selected files',
+	Argument('hash',
+		help = 'Hashes of files to show',
+		nargs = '+',
+	),
+	Argument('-f', '--format',
+		help = 'Output format',
+		dest = 'format',
+		choices = OUTPUT_FORMATS,
+		default = 'long',
+	),
+	Argument('-l', '--long',
+		help = 'Show metadata (default no)',
+		dest = 'format',
+		action = 'store_const',
+		const = 'long'
+	),
+)
 def command_show(db, args):
 	for hash in args.hash:
 		try:
@@ -221,6 +489,16 @@ def command_show(db, args):
 		except common.FileDoesNotExistError: error('{}: does not exist', hash)
 
 ### `set`
+@add_command(
+	'tag',
+	'Add a given tag to a file',
+	Argument('hash',
+		help = 'Hash of file to change',
+	),
+	Argument('tag',
+		help = 'Tag to add',
+	),
+)
 @auto_checkpoint
 def command_tag(db, args):
 	try:
@@ -239,6 +517,14 @@ def command_tag(db, args):
 	return 1
 
 ### `undo`
+@add_command(
+	'undo',
+	'Undo the last checkpoint',
+	Argument('checkpoint',
+		help = 'Checkpoint to undo (or last)',
+		nargs = '?',
+	),
+)
 @auto_checkpoint
 def command_undo(db, args):
 	try:
@@ -260,14 +546,6 @@ class SubcommandHelpFormatter(argparse.RawDescriptionHelpFormatter):
 		if action.nargs == argparse.PARSER:
 			parts = "\n".join(parts.split("\n")[1:])
 		return parts
-
-def _mapping_argument_type(val):
-	parts = val.split('=')
-
-	if len(parts) != 2 or not all(parts):
-		raise argparse.ArgumentTypeError('should be of format FROM=TO')
-
-	return tuple(parts)
 
 ## Main
 def main():
@@ -303,237 +581,8 @@ def main():
 		)
 
 	### Commands
-	p = subparsers.add_parser(
-		'add',
-		aliases = ['take'],
-		help = 'add an external file to the DB (use \'take\' to move instead of copying)',
-	)
-	p.add_argument('--restore',
-		action = 'store_true',
-		help = 'Restore previous metadata for this file',
-	)
-	p.add_argument('file',
-		help = 'External file(s) to add',
-		metavar = 'FILE',
-		nargs = '+',
-		type = argparse.FileType('rb'),
-	)
-
-	p = subparsers.add_parser(
-		'delete',
-		aliases = ['rm'],
-		help = 'Delete a file',
-	)
-	p.add_argument('hash',
-		help = 'Hashes of file(s) to delete',
-		metavar = 'HASH',
-		nargs = '+',
-	)
-
-	p = subparsers.add_parser(
-		'dump',
-		help = 'Dump raw information from the database',
-	)
-
-	dump_subparsers = p.add_subparsers(
-		title = 'subcommands',
-		dest = 'subcommand',
-		metavar = '<subcommand>',
-	)
-
-	dp = dump_subparsers.add_parser(
-		'journal',
-		help = 'Dump all checkpoints in YAML format',
-	)
-
-	dp = dump_subparsers.add_parser(
-		'metadata',
-		help = 'Dump metadata for all files in YAML format',
-	)
-
-	p = subparsers.add_parser(
-		'edit',
-		help = 'Edit all of the metadata of a given file',
-	)
-	p.add_argument('hash',
-		help = 'hash of file to edit',
-		metavar = 'HASH',
-	)
-	p.add_argument('-n', '--dry-run',
-		action = 'store_true',
-		help = 'Don\'t save edits to database',
-	)
-	p.add_argument('-v', '--verbose',
-		action = 'store_true',
-		help = 'Show changes to metadata',
-	)
-
-	p = subparsers.add_parser(
-		'exists',
-		help = 'Check whether a file exists and set exit status accordingly',
-	)
-	p.add_argument('hash',
-		help = 'hash of file to check for',
-		metavar = 'HASH',
-	)
-
-	p = subparsers.add_parser(
-		'export',
-		help = 'Export file contents/metadata',
-	)
-	p.add_argument('-a', '--all',
-		action = 'store_true',
-		help = 'Export all files',
-	)
-	p.add_argument('-m', '--metadata-only',
-		action = 'store_true',
-		help = 'Only export metadata, not file contents',
-	)
-	p.add_argument('-o', '--output-filename',
-		dest = 'output_file',
-		type = argparse.FileType('wb'),
-		help = 'Output filename (if not specified, defaults to ./YYYY-MM-DD-HH-MM-SS.qualia'
-	)
-	p.add_argument('hash',
-		help = 'Specific hashes to export',
-		metavar = 'HASH',
-		nargs = '*',
-	)
-
-	p = subparsers.add_parser(
-		'field',
-		help = 'Change available fields',
-	)
-
-	field_subparsers = p.add_subparsers(
-		title = 'subcommands',
-		dest = 'subcommand',
-		metavar = '<subcommand>',
-	)
-
-	fp = field_subparsers.add_parser(
-		'list',
-		help = 'List available fields',
-	)
-
-	p = subparsers.add_parser(
-		'find-hashes',
-		help = 'Print all hashes starting with PREFIX',
-	)
-	p.add_argument('prefix',
-		help = 'prefix to hashes to look for',
-		metavar = 'PREFIX',
-	)
-
-	p = subparsers.add_parser(
-		'import',
-		help = 'Import a previous export',
-	)
-	p.add_argument('file',
-		help = 'Qualia export file',
-		metavar = 'FILE',
-		type = argparse.FileType('rb'),
-	)
-	p.add_argument('-r', '--rename',
-		help = 'Field rename on import, can specify multiple',
-		action = 'append',
-		dest = 'rename',
-		metavar = 'FROM=TO',
-		type = _mapping_argument_type,
-	)
-
-	p = subparsers.add_parser(
-		'log',
-		help = 'Print modifications to the database',
-	)
-
-	p = subparsers.add_parser(
-		'search',
-		help = 'Search files by metadata',
-	)
-	p.add_argument('query',
-		metavar = 'QUERY',
-		nargs = '+'
-	)
-	p.add_argument('-f', '--format',
-		help = 'Output format',
-		dest = 'format',
-		choices = OUTPUT_FORMATS,
-		default = 'short_hash',
-	)
-	p.add_argument('-l', '--long',
-		help = 'Show metadata (default no)',
-		dest = 'format',
-		action = 'store_const',
-		const = 'long'
-	)
-	p.add_argument('-n', '--limit',
-		help = 'Number of results to show',
-		type = int,
-		default = 10
-	)
-
-	p = subparsers.add_parser(
-		'set',
-		help = 'Set metadata for a given file',
-	)
-	p.add_argument('hash',
-		help = 'Hash of file to change',
-		metavar = 'HASH',
-	)
-	p.add_argument('field',
-		help = 'Metadata field',
-		metavar = 'FIELD',
-	)
-	p.add_argument('value',
-		help = 'Metadata value',
-		metavar = 'VALUE',
-	)
-
-	p = subparsers.add_parser(
-		'show',
-		help = 'Show metadata for selected files',
-	)
-	p.add_argument('hash',
-		help = 'Hashes of files to show',
-		metavar = 'HASH',
-		nargs = '+',
-	)
-	p.add_argument('-f', '--format',
-		help = 'Output format',
-		dest = 'format',
-		choices = OUTPUT_FORMATS,
-		default = 'long',
-	)
-	p.add_argument('-l', '--long',
-		help = 'Show metadata (default no)',
-		dest = 'format',
-		action = 'store_const',
-		const = 'long'
-	)
-
-	p = subparsers.add_parser(
-		'tag',
-		help = 'Add a given tag to a file',
-	)
-	p.add_argument('hash',
-		help = 'Hash of file to change',
-		metavar = 'HASH',
-	)
-	p.add_argument('tag',
-		help = 'Tag to add',
-		metavar = 'TAG',
-	)
-
-	p = subparsers.add_parser(
-		'undo',
-		help = 'Undo the last checkpoint',
-	)
-	p.add_argument('checkpoint',
-		help = 'Checkpoint to undo (or last)',
-		metavar = 'CHECKPOINT',
-		nargs = '?',
-	)
+	for _, command in sorted(known_commands.items()):
+		command.add_to_parser(subparsers)
 
 	args = parser.parse_args()
 
@@ -558,9 +607,9 @@ def main():
 	# `args.command` should be limited to the defined subcommands, but there's not much risk here
 	# anyway.
 	if 'subcommand' in args:
-		return_code = globals()['subcommand_' + (args.command + '-' + args.subcommand).replace('-', '_')](db, args) or 0
+		return_code = known_commands[args.command].subcommands[args.subcommand].func(db, args) or 0
 	else:
-		return_code = globals()['command_' + args.command.replace('-', '_')](db, args) or 0
+		return_code = known_commands[args.command].func(db, args) or 0
 	db.close()
 
 	sys.exit(return_code)
