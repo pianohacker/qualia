@@ -87,7 +87,7 @@ class Argument:
 		# While the class is largely a wrapper around `add_argument`, we do some preprocessing for
 		# convenience's sake.
 		if not name.startswith('-'):
-			kwargs['metavar'] = name.upper()
+			kwargs.setdefault('metavar', name.upper())
 
 		self.name = name
 		self.args = args
@@ -100,6 +100,12 @@ class Argument:
 			*self.args,
 			**self.kwargs
 		)
+
+	def derive(self, **kwargs):
+		new_kwargs = dict(self.kwargs)
+		new_kwargs.update(kwargs)
+
+		return Argument(self.name, *self.args, **new_kwargs)
 
 # Holds the information and arguments for a given command.
 class Command:
@@ -169,6 +175,11 @@ def add_wrapper(name, *args, **kwargs):
 	return cmd
 
 ### Common arguments
+arg_format = Argument('-f', '--format',
+	help = 'Output format',
+	dest = 'format',
+	choices = OUTPUT_FORMATS,
+)
 
 ### `add`/`take`
 @add_command('add',
@@ -406,10 +417,7 @@ def command_log(db, args):
 	Argument('query',
 		nargs = '+'
 	),
-	Argument('-f', '--format',
-		help = 'Output format',
-		dest = 'format',
-		choices = OUTPUT_FORMATS,
+	arg_format.derive(
 		default = 'short_hash',
 	),
 	Argument('-l', '--long',
@@ -466,10 +474,7 @@ def command_set(db, args):
 		help = 'Hashes of files to show',
 		nargs = '+',
 	),
-	Argument('-f', '--format',
-		help = 'Output format',
-		dest = 'format',
-		choices = OUTPUT_FORMATS,
+	arg_format.derive(
 		default = 'long',
 	),
 	Argument('-l', '--long',
