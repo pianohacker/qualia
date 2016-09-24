@@ -97,7 +97,7 @@ def from_flat_hash(*args):
 	return dict(zip(args[::2], args[1::2]))
 
 # `DictItem`s represent mappings within the config hierarchy, and can contain default values for
-# given names underneath it and for any other name (under the key `_other`).
+# given names underneath it and for any missing name (under the key `_other`).
 #
 # Values provided for these items are merged in recursively, with each child item controlling how
 # provided values are merged.
