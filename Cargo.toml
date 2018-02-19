@@ -4,3 +4,5 @@ version = "0.1.0"
 authors = ["Jesse Weaver <pianohacker@gmail.com>"]
 
 [dependencies]
+clap = "2.26"
+failure = "0.1.1"

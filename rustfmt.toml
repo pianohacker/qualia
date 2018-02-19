@@ -1,0 +1,8 @@
+binop_separator = "Back"
+max_width = 100
+hard_tabs = true
+imports_indent = "Visual"
+normalize_comments = true
+report_todo = "Always"
+report_fixme = "Always"
+wrap_comments = true
