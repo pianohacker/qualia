@@ -3,10 +3,11 @@ use std::collections::HashMap;
 use std::fs::metadata;
 use std::sync::Mutex;
 
+use common;
 use failure::Error;
 
 lazy_static! {
-	static ref COMMAND_MAP: Mutex<HashMap<&'static str, fn (&ArgMatches) -> Result<(), Error>>> = Mutex::new(HashMap::new());
+	static ref COMMAND_MAP: Mutex<HashMap<&'static str, fn (common::AppSettings, &ArgMatches) -> Result<(), Error>>> = Mutex::new(HashMap::new());
 }
 
 macro_rules! subcommand {
@@ -27,7 +28,7 @@ pub fn register<'a, 'b>(mut app: App<'a, 'b>) -> App<'a, 'b> {
 				.multiple(true)
 				.takes_value(true)
 		),
-		|matches| {
+		|settings, matches| {
 			for filename in matches.values_of("filename").unwrap() {
 				metadata(filename).map_err(|e| format_err!("{}: {}", filename, e))?;
 			}
@@ -41,7 +42,7 @@ pub fn register<'a, 'b>(mut app: App<'a, 'b>) -> App<'a, 'b> {
 	app
 }
 
-pub fn run<'a>(matches: ArgMatches<'a>) -> Result<(), Error> {
+pub fn run<'a>(app_settings: common::AppSettings, matches: ArgMatches<'a>) -> Result<(), Error> {
 	let command_map = COMMAND_MAP.lock().unwrap();
 
 	let subcmd = matches.subcommand_name().expect("no subcommand given");
@@ -49,5 +50,5 @@ pub fn run<'a>(matches: ArgMatches<'a>) -> Result<(), Error> {
 		.get(subcmd)
 		.expect("should not be reached, subcommand given but unknown");
 
-	command_impl(matches.subcommand_matches(subcmd).unwrap())
+	command_impl(app_settings, matches.subcommand_matches(subcmd).unwrap())
 }

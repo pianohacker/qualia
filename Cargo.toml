@@ -7,3 +7,4 @@ authors = ["Jesse Weaver <pianohacker@gmail.com>"]
 clap = "2.26"
 failure = "0.1.1"
 lazy_static = "1.0"
+rusqlite = "0.13"
