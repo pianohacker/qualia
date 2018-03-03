@@ -4,6 +4,7 @@ use std::fs::metadata;
 use std::sync::Mutex;
 
 use common;
+use collection::Collection;
 use failure::Error;
 
 lazy_static! {
@@ -29,11 +30,16 @@ pub fn register<'a, 'b>(mut app: App<'a, 'b>) -> App<'a, 'b> {
 				.takes_value(true)
 		),
 		|settings, matches| {
-			for filename in matches.values_of("filename").unwrap() {
+			let collection = Collection::open(settings.collection_dir)?;
+			let files = matches.values_of("filename").unwrap();
+
+			for filename in files.clone() {
 				metadata(filename).map_err(|e| format_err!("{}: {}", filename, e))?;
 			}
 
-			println!("add!");
+			for filename in files {
+				collection.add(filename);
+			}
 
 			Ok(())
 		}

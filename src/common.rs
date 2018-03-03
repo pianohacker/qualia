@@ -2,13 +2,15 @@ use std::env;
 use std::path::PathBuf;
 
 pub struct AppSettings {
-	pub db_path: PathBuf,
+	pub collection_dir: PathBuf,
 }
 
 pub fn default_settings() -> AppSettings {
-	let mut db_path = env::home_dir().expect("home directory not defined");
+	let mut collection_dir = env::home_dir().expect("home directory not defined");
 
-	db_path.push("q");
+	collection_dir.push("q");
 
-	return AppSettings { db_path };
+	return AppSettings {
+		collection_dir: collection_dir,
+	};
 }
