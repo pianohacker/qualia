@@ -1,10 +1,12 @@
 #[macro_use]
 extern crate clap;
+extern crate digest;
 #[macro_use]
 extern crate failure;
 #[macro_use]
 extern crate lazy_static;
 extern crate rusqlite;
+extern crate sha2;
 
 use clap::{App, Arg, ArgMatches};
 use failure::Error;

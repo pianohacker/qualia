@@ -38,7 +38,7 @@ pub fn register<'a, 'b>(mut app: App<'a, 'b>) -> App<'a, 'b> {
 			}
 
 			for filename in files {
-				collection.add(filename);
+				collection.add(filename)?;
 			}
 
 			Ok(())
