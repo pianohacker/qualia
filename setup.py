@@ -37,7 +37,7 @@ setup(
 	},
 
 	install_requires = [
-		'Magic-file-extensions',
+		'file-magic',
 		'Pillow',
 	]
 )

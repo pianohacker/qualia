@@ -33,6 +33,25 @@ lazy_import(globals(), """
 	import tempfile
 """)
 
+## Initialization
+
+def open(*args, **kwargs):
+	return DatabaseNew(*args, **kwargs)
+
+class DatabaseNew:
+	def __init__(self, db_path):
+		self.db_path = db_path
+		self._objects = []
+
+	def add(self, item):
+		self._objects.append(item)
+
+	def select(self):
+		return self._objects[:]
+
+	def __len__(self):
+		return len(self._objects)
+
 ## Constants
 # Each major database revision has a version number; we're currently only on version 1, but this
 # might be needed for sanity checking in the future. It's stored in the `state` file for now.
