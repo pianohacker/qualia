@@ -14,6 +14,6 @@ def _get_temp_directory(context):
 
 @given('an empty database')
 def step_impl(context):
-	dir = _get_temp_directory(context)
+	context.db_dir = _get_temp_directory(context)
 
-	context.db = qualia.open(path.join(dir, 'empty.qualia'))
+	context.db = qualia.open(path.join(context.db_dir, 'empty.qualia'))

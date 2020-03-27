@@ -10,3 +10,12 @@ Feature: Basic operation
 		 And we list the objects in that database
 		Then we see 1 objects
 		 And one of those objects is called "spam"
+
+	Scenario: Objects should persist
+		Given an empty database
+		When we add "foobar" to the database
+		 And we close the database
+		 And we reopen the database
+		 And we list the objects in that database
+		Then we see 1 objects
+		 And one of those objects is called "foobar"

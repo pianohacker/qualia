@@ -49,6 +49,9 @@ class DatabaseNew:
 	def select(self):
 		return self._objects[:]
 
+	def close(self):
+		pass
+
 	def __len__(self):
 		return len(self._objects)
 
