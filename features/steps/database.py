@@ -1,8 +1,8 @@
-from behave import given
+from behave import given, when
 
 from os import path
-import shutil
 import qualia
+import shutil
 import tempfile
 
 def _get_temp_directory(context):
@@ -16,4 +16,12 @@ def _get_temp_directory(context):
 def step_impl(context):
 	context.db_dir = _get_temp_directory(context)
 
+	context.db = qualia.open(path.join(context.db_dir, 'empty.qualia'))
+
+@when('we close the database')
+def step_impl(context):
+	context.db.close()
+
+@when('we reopen the database')
+def step_impl(context):
 	context.db = qualia.open(path.join(context.db_dir, 'empty.qualia'))
