@@ -80,7 +80,7 @@ class DatabaseNew:
 			self.db.executescript(update)
 			self.db.execute("PRAGMA user_version = {}".format(version))
 
-	def add(self, item):
+	def add(self, **properties):
 		self.db.execute(
 			'''
 				INSERT
@@ -88,7 +88,7 @@ class DatabaseNew:
 					VALUES(?)
 			''',
 			(
-				json.dumps(item),
+				json.dumps(properties),
 			)
 		)
 
@@ -97,7 +97,7 @@ class DatabaseNew:
 	def all(self):
 		return DatabaseNewSubset(self.db, {})
 
-	def select(self, params):
+	def select(self, **params):
 		return DatabaseNewSubset(self.db, params)
 
 	def close(self):
@@ -106,7 +106,7 @@ class DatabaseNew:
 class DatabaseNewSubset:
 	def __init__(self, db, params):
 		self.db = db
-		self.params = params
+		self._params = params
 
 		if params:
 			self._where_clause = 'WHERE ' + ' AND '.join(
@@ -116,13 +116,13 @@ class DatabaseNewSubset:
 		else:
 			self._where_clause = ''
 
-	def _where_query(self, inner_query):
+	def _where_query(self, inner_query, *other_params):
 		cur = self.db.cursor()
 		cur.execute(f'''
 			{inner_query}
 				{self._where_clause}
 			''',
-			tuple(self.params.values()),
+			other_params + tuple(self._params.values()),
 		)
 
 		return cur
@@ -132,6 +132,15 @@ class DatabaseNewSubset:
 			DELETE
 				FROM objects
 			''',
+		)
+
+	def update(self, **new_properties):
+		self._where_query(f'''
+			UPDATE
+				objects
+				SET properties = json_patch(properties, ?)
+			''',
+			json.dumps(new_properties),
 		)
 
 	def __iter__(self):
