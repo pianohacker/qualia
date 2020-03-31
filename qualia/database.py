@@ -51,7 +51,7 @@ class DatabaseNew:
 		)
 		# Make SQLite use a write-ahead instead of a delete-based journal; see
 		# [the SQLite documentation](https://www.sqlite.org/wal.html) for more info.
-		self.db.execute('PRAGMA journal_mode=WAL');
+		self.db.execute('PRAGMA journal_mode=WAL')
 
 		# This replaces the usual tuple format for rows with a convenient dict-like object.
 		self.db.row_factory = sqlite3.Row
@@ -95,8 +95,47 @@ class DatabaseNew:
 		self.db.commit()
 
 	def all(self):
+		return DatabaseNewSubset(self.db, {})
+
+	def select(self, params):
+		return DatabaseNewSubset(self.db, params)
+
+	def close(self):
+		self.db.close()
+
+class DatabaseNewSubset:
+	def __init__(self, db, params):
+		self.db = db
+		self.params = params
+
+		if params:
+			self._where_clause = 'WHERE ' + ' AND '.join(
+				f'json_extract(properties, "$.{k}") = ?'
+				for k in params.keys()
+			)
+		else:
+			self._where_clause = ''
+
+	def _where_query(self, inner_query):
 		cur = self.db.cursor()
-		cur.execute('''
+		cur.execute(f'''
+			{inner_query}
+				{self._where_clause}
+			''',
+			tuple(self.params.values()),
+		)
+
+		return cur
+
+	def delete(self):
+		self._where_query(f'''
+			DELETE
+				FROM objects
+			''',
+		)
+
+	def __iter__(self):
+		cur = self._where_query(f'''
 			SELECT
 				*
 				FROM objects
@@ -106,8 +145,15 @@ class DatabaseNew:
 		for row in cur.fetchall():
 			yield dict(json.loads(row['properties']), object_id = row['object_id'])
 
-	def close(self):
-		self.db.close()
+	def __len__(self):
+		cur = self._where_query(f'''
+			SELECT
+				COUNT(*)
+				FROM objects
+			''',
+		)
+
+		return cur.fetchone()[0]
 
 ## Constants
 # Each major database revision has a version number; we're currently only on version 1, but this

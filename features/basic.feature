@@ -19,3 +19,13 @@ Feature: Basic operation
 		 And we list the objects in that database
 		Then we see 1 objects
 		 And one of those objects is called "foobar"
+
+	Scenario: Deletion
+		Given an empty database
+
+		When we add "James" to the database
+		 And we add "Jimmy" to the database
+		 And we delete "James" from the database
+		 And we list the objects in that database
+		Then we see 1 objects
+		 And one of those objects is called "Jimmy"
