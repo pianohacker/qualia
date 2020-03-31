@@ -12,16 +12,16 @@ def _get_temp_directory(context):
 
 	return dir
 
-@given('an empty database')
+@given('an empty store')
 def step_impl(context):
-	context.db_dir = _get_temp_directory(context)
+	context.store_dir = _get_temp_directory(context)
 
-	context.db = qualia.open(path.join(context.db_dir, 'empty.qualia'))
+	context.store = qualia.open(path.join(context.store_dir, 'empty.qualia'))
 
-@when('we close the database')
+@when('we close the store')
 def step_impl(context):
-	context.db.close()
+	context.store.close()
 
-@when('we reopen the database')
+@when('we reopen the store')
 def step_impl(context):
-	context.db = qualia.open(path.join(context.db_dir, 'empty.qualia'))
+	context.store = qualia.open(path.join(context.store_dir, 'empty.qualia'))

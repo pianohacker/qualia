@@ -1,1 +1,1 @@
-from .database import open
+from .store import open
