@@ -18,6 +18,14 @@ def step_impl(context):
 
 	context.store = qualia.open(path.join(context.store_dir, 'empty.qualia'))
 
+@when('commit')
+def step_impl(context):
+	context.store.commit()
+
+@when('we undo')
+def step_impl(context):
+	context.store.undo()
+
 @when('we close the store')
 def step_impl(context):
 	context.store.close()

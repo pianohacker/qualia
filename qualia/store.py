@@ -15,8 +15,8 @@
 # You should have received a copy of the GNU General Public License
 # along with Qualia. If not, see <http://www.gnu.org/licenses/>.
 
-## Imports
 from .lazy_import import lazy_import
+from .import common
 
 lazy_import(globals(), """
 	import json
@@ -49,12 +49,12 @@ class Store:
 
 		# This replaces the usual tuple format for rows with a convenient dict-like object.
 		self.db.row_factory = sqlite3.Row
-		self.upgrade_if_needed()
+		self._upgrade_if_needed()
 
 		# This indicates whether there have been changes since the last checkpoint.
 		self.has_changes = False
 
-	def upgrade_if_needed(self):
+	def _upgrade_if_needed(self):
 		# We check the version of the database and upgrade it if necessary.
 		# Conveniently, this starts at 0 in an empty database.
 		version = self.db.execute('PRAGMA user_version').fetchone()[0]
@@ -65,7 +65,21 @@ class Store:
 					object_id INTEGER PRIMARY KEY,
 					properties TEXT
 				);
+			""",
 			"""
+				CREATE TABLE journal (
+					serial INTEGER PRIMARY KEY,
+					timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+					object_id INTEGER,
+					action TEXT,
+					extra TEXT
+				);
+				CREATE TABLE checkpoints (
+					checkpoint_id INTEGER PRIMARY KEY,
+					timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+					serial INTEGER
+				);
+			""",
 		]
 
 		# We set the `user_version` after each update to ensure updates are not applied twice if one
@@ -74,8 +88,33 @@ class Store:
 			self.db.executescript(update)
 			self.db.execute("PRAGMA user_version = {}".format(version))
 
-	def add(self, **properties):
+	def _add_journal_entry(self, object_id, action, extra):
 		self.db.execute(
+			'''
+				INSERT
+					INTO journal(object_id, action, extra)
+					VALUES(?, ?, ?)
+			''',
+			(
+				object_id,
+				action,
+				json.dumps(extra),
+			)
+		)
+
+	def _add_checkpoint(self):
+		self.db.execute(
+			'''
+				INSERT
+					INTO checkpoints(serial)
+					SELECT
+						MAX(serial)
+						FROM journal
+			'''
+		)
+
+	def add(self, **properties):
+		cur = self.db.execute(
 			'''
 				INSERT
 					INTO objects(properties)
@@ -84,6 +123,91 @@ class Store:
 			(
 				json.dumps(properties),
 			)
+		)
+
+		self._add_journal_entry(
+			cur.lastrowid,
+			'add',
+			None,
+		)
+
+	def _undo_add(self, object_id, extra):
+		self.db.execute(
+			'''
+				DELETE
+					FROM objects
+					WHERE object_id = ?
+			''',
+			(
+				object_id,
+			)
+		)
+
+	def commit(self):
+		self._add_checkpoint()
+		self.db.commit()
+
+	def undo(self):
+		cur = self.db.execute(f'''
+			SELECT
+				checkpoint_id, serial
+				FROM checkpoints
+				ORDER BY checkpoint_id DESC
+				LIMIT 2
+			''',
+		)
+
+		checkpoint_id, end_serial = cur.fetchone() or (None, None)
+		_, start_serial = cur.fetchone() or (None, None)
+
+		if end_serial is None:
+			# Nothing to do
+			return
+
+		if start_serial is None:
+			start_serial = 0
+
+		cur = self.db.execute(f'''
+			SELECT
+				*
+				FROM journal
+				WHERE
+					serial > ?
+					AND serial <= ?
+			''',
+			(
+				start_serial,
+				end_serial,
+			),
+		)
+
+		for row in cur.fetchall():
+			undo_impl = getattr(self, f'_undo_{row["action"]}')
+
+			undo_impl(row['object_id'], row['extra'])
+
+		self.db.execute(f'''
+			DELETE
+				FROM journal
+				WHERE
+					serial > ?
+					AND serial <= ?
+			''',
+			(
+				start_serial,
+				end_serial,
+			),
+		)
+
+		self.db.execute(f'''
+			DELETE
+				FROM checkpoints
+				WHERE
+					checkpoint_id = ?
+			''',
+			(
+				checkpoint_id,
+			),
 		)
 
 		self.db.commit()

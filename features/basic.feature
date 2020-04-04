@@ -14,6 +14,7 @@ Feature: Basic operation
 	Scenario: Objects should persist
 		Given an empty store
 		When we add the object "foobar"
+		 And commit
 		 And we close the store
 		 And we reopen the store
 		 And we list the objects
