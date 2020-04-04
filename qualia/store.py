@@ -67,12 +67,12 @@ class Store:
 				);
 			""",
 			"""
-				CREATE TABLE journal (
+				CREATE TABLE object_changes (
 					serial INTEGER PRIMARY KEY,
 					timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 					object_id INTEGER,
 					action TEXT,
-					extra TEXT
+					previous TEXT
 				);
 				CREATE TABLE checkpoints (
 					checkpoint_id INTEGER PRIMARY KEY,
@@ -88,17 +88,17 @@ class Store:
 			self.db.executescript(update)
 			self.db.execute("PRAGMA user_version = {}".format(version))
 
-	def _add_journal_entry(self, object_id, action, extra):
+	def _add_change(self, object_id, action, previous):
 		self.db.execute(
 			'''
 				INSERT
-					INTO journal(object_id, action, extra)
+					INTO object_changes(object_id, action, previous)
 					VALUES(?, ?, ?)
 			''',
 			(
 				object_id,
 				action,
-				json.dumps(extra),
+				json.dumps(previous),
 			)
 		)
 
@@ -109,7 +109,7 @@ class Store:
 					INTO checkpoints(serial)
 					SELECT
 						MAX(serial)
-						FROM journal
+						FROM object_changes
 			'''
 		)
 
@@ -125,13 +125,13 @@ class Store:
 			)
 		)
 
-		self._add_journal_entry(
+		self._add_change(
 			cur.lastrowid,
 			'add',
-			None,
+			dict(),
 		)
 
-	def _undo_add(self, object_id, extra):
+	def _undo_add(self, object_id, previous):
 		self.db.execute(
 			'''
 				DELETE
@@ -140,6 +140,19 @@ class Store:
 			''',
 			(
 				object_id,
+			)
+		)
+
+	def _undo_delete(self, object_id, previous):
+		self.db.execute(
+			'''
+				INSERT
+					INTO objects(object_id, properties)
+					VALUES(?, ?)
+			''',
+			(
+				object_id,
+				json.dumps(previous),
 			)
 		)
 
@@ -170,7 +183,7 @@ class Store:
 		cur = self.db.execute(f'''
 			SELECT
 				*
-				FROM journal
+				FROM object_changes
 				WHERE
 					serial > ?
 					AND serial <= ?
@@ -184,11 +197,11 @@ class Store:
 		for row in cur.fetchall():
 			undo_impl = getattr(self, f'_undo_{row["action"]}')
 
-			undo_impl(row['object_id'], row['extra'])
+			undo_impl(row['object_id'], json.loads(row['previous']))
 
 		self.db.execute(f'''
 			DELETE
-				FROM journal
+				FROM object_changes
 				WHERE
 					serial > ?
 					AND serial <= ?
@@ -213,17 +226,18 @@ class Store:
 		self.db.commit()
 
 	def all(self):
-		return StoreSubset(self.db, {})
+		return StoreSubset(self, {})
 
 	def select(self, **params):
-		return StoreSubset(self.db, params)
+		return StoreSubset(self, params)
 
 	def close(self):
 		self.db.close()
 
 class StoreSubset:
-	def __init__(self, db, params):
-		self.db = db
+	def __init__(self, store, params):
+		self.db = store.db
+		self.store = store
 		self._params = params
 
 		if params:
@@ -245,12 +259,31 @@ class StoreSubset:
 
 		return cur
 
+	def _where_operation(self, inner_query, *other_params):
+		affected_objects = list(self)
+
+		self._where_query(
+			inner_query,
+			*other_params
+		)
+
+		return affected_objects
+
+	def _add_multi_changes(self, action, affected_objects):
+		for object in affected_objects:
+			properties = dict(object)
+			del properties['object_id']
+
+			self.store._add_change(object['object_id'],'delete',  properties)
+
 	def delete(self):
-		self._where_query(f'''
+		affected_objects = self._where_operation(f'''
 			DELETE
 				FROM objects
 			''',
 		)
+
+		self._add_multi_changes('delete', affected_objects)
 
 	def update(self, **new_properties):
 		self._where_query(f'''

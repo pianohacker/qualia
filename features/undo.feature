@@ -13,6 +13,19 @@ Feature: undoing operations
 		Then we see 1 objects
 		 And one of those objects is called "first"
 
+	Scenario: undoing deletion
+		Given an empty store
+		When we add the object "first"
+		 And we delete the object "first"
+		 And commit
+		 And we list the objects
+		Then we see 0 objects
+
+		When we undo
+		 And we list the objects
+		Then we see 1 objects
+		 And one of those objects is called "first"
+
 	Scenario: undoing multiple operations
 		Given an empty store
 		When we add the object "first"
