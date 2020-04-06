@@ -16,10 +16,59 @@ Feature: undoing operations
 	Scenario: undoing deletion
 		Given an empty store
 		When we add the object "first"
+		 And we add the object "second"
+		 And commit
 		 And we delete the object "first"
 		 And commit
 		 And we list the objects
+		Then we see 1 objects
+		 And one of those objects is called "second"
+
+		When we undo
+		 And we list the objects
+		Then we see 2 objects
+		 And one of those objects is called "first"
+		 And one of those objects is called "second"
+
+	Scenario: undoing modification
+		Given an empty store
+		When we add the object "first"
+		 And commit
+		 And we rename the object "first" to "second"
+		 And commit
+		 And we list the objects
+		Then we see 1 objects
+		 And one of those objects is called "second"
+
+		When we undo
+		 And we list the objects
+		Then we see 1 objects
+		 And one of those objects is called "first"
+
+	Scenario: undoing deletion and modification in the right order
+		Given an empty store
+		When we add the object "first"
+		 And commit
+		 And we rename the object "first" to "second"
+		 And we delete the object "second"
+		 And commit
+		 And we list the objects
 		Then we see 0 objects
+
+		When we undo
+		 And we list the objects
+		Then we see 1 objects
+		 And one of those objects is called "first"
+
+	Scenario: undoing modification
+		Given an empty store
+		When we add the object "first"
+		 And commit
+		 And we rename the object "first" to "second"
+		 And commit
+		 And we list the objects
+		Then we see 1 objects
+		 And one of those objects is called "second"
 
 		When we undo
 		 And we list the objects

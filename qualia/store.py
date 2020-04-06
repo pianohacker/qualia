@@ -59,10 +59,11 @@ class Store:
 		# Conveniently, this starts at 0 in an empty database.
 		version = self.db.execute('PRAGMA user_version').fetchone()[0]
 
+		# We use `AUTOINCREMENT` on the objects table so that IDs are not reused.
 		updates = [
 			"""
 				CREATE TABLE objects (
-					object_id INTEGER PRIMARY KEY,
+					object_id INTEGER PRIMARY KEY AUTOINCREMENT,
 					properties TEXT
 				);
 			""",
@@ -156,6 +157,20 @@ class Store:
 			)
 		)
 
+	def _undo_update(self, object_id, previous):
+		self.db.execute(
+			'''
+				UPDATE
+					objects
+					SET properties = ?
+					WHERE object_id = ?
+			''',
+			(
+				json.dumps(previous),
+				object_id,
+			)
+		)
+
 	def commit(self):
 		self._add_checkpoint()
 		self.db.commit()
@@ -187,6 +202,7 @@ class Store:
 				WHERE
 					serial > ?
 					AND serial <= ?
+				ORDER BY serial DESC
 			''',
 			(
 				start_serial,
@@ -259,7 +275,7 @@ class StoreSubset:
 
 		return cur
 
-	def _where_operation(self, inner_query, *other_params):
+	def _where_operation(self, action, inner_query, *other_params):
 		affected_objects = list(self)
 
 		self._where_query(
@@ -267,26 +283,24 @@ class StoreSubset:
 			*other_params
 		)
 
-		return affected_objects
+		self._add_multi_changes(action, affected_objects)
 
 	def _add_multi_changes(self, action, affected_objects):
 		for object in affected_objects:
 			properties = dict(object)
 			del properties['object_id']
 
-			self.store._add_change(object['object_id'],'delete',  properties)
+			self.store._add_change(object['object_id'], action,  properties)
 
 	def delete(self):
-		affected_objects = self._where_operation(f'''
+		self._where_operation('delete', f'''
 			DELETE
 				FROM objects
 			''',
 		)
 
-		self._add_multi_changes('delete', affected_objects)
-
 	def update(self, **new_properties):
-		self._where_query(f'''
+		self._where_operation('update', f'''
 			UPDATE
 				objects
 				SET properties = json_patch(properties, ?)
