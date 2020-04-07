@@ -21,7 +21,7 @@ Feature: Basic operation
 		Then we see 1 objects
 		 And one of those objects is called "foobar"
 
-	Scenario: Deletion
+	Scenario: Deletion should remove an object
 		Given an empty store
 
 		When we add the object "James"
@@ -31,7 +31,7 @@ Feature: Basic operation
 		Then we see 1 objects
 		 And one of those objects is called "Jimmy"
 
-	Scenario: Deletion
+	Scenario: Modifications should stick
 		Given an empty store
 
 		When we add the object "James"

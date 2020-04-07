@@ -16,7 +16,7 @@
 # along with Qualia. If not, see <http://www.gnu.org/licenses/>.
 
 from .lazy_import import lazy_import
-from .import common
+from .import common, query
 
 lazy_import(globals(), """
 	import json
@@ -242,65 +242,58 @@ class Store:
 		self.db.commit()
 
 	def all(self):
-		return StoreSubset(self, {})
+		return StoreSubset(self, query.Empty())
 
 	def select(self, **params):
-		return StoreSubset(self, params)
+		q = query.AndMatchers(*(query.EqualityMatch(k, v) for (k, v) in params.items()))
+		return StoreSubset(self, q)
 
 	def close(self):
 		self.db.close()
 
+## Virtual item collection
 class StoreSubset:
-	def __init__(self, store, params):
-		self.db = store.db
-		self.store = store
-		self._params = params
+	def __init__(self, store, q):
+		self._db = store.db
+		self._store = store
+		self._q = q
 
-		if params:
-			self._where_clause = 'WHERE ' + ' AND '.join(
-				f'json_extract(properties, "$.{k}") = ?'
-				for k in params.keys()
-			)
-		else:
-			self._where_clause = ''
+		self._where_clause, self._where_params = q.visit(_QUERY_SQL_HANDLERS)
 
-	def _where_query(self, inner_query, *other_params):
-		cur = self.db.cursor()
+	def _query_where(self, inner_query, *other_params):
+		cur = self._db.cursor()
 		cur.execute(f'''
 			{inner_query}
-				{self._where_clause}
+				WHERE {self._where_clause}
 			''',
-			other_params + tuple(self._params.values()),
+			other_params + self._where_params,
 		)
 
 		return cur
 
-	def _where_operation(self, action, inner_query, *other_params):
+	def _do(self, action, inner_query, *other_params):
 		affected_objects = list(self)
 
-		self._where_query(
+		self._query_where(
 			inner_query,
 			*other_params
 		)
 
-		self._add_multi_changes(action, affected_objects)
-
-	def _add_multi_changes(self, action, affected_objects):
 		for object in affected_objects:
 			properties = dict(object)
 			del properties['object_id']
 
-			self.store._add_change(object['object_id'], action,  properties)
+			self._store._add_change(object['object_id'], action,  properties)
 
 	def delete(self):
-		self._where_operation('delete', f'''
+		self._do('delete', f'''
 			DELETE
 				FROM objects
 			''',
 		)
 
 	def update(self, **new_properties):
-		self._where_operation('update', f'''
+		self._do('update', f'''
 			UPDATE
 				objects
 				SET properties = json_patch(properties, ?)
@@ -309,7 +302,7 @@ class StoreSubset:
 		)
 
 	def __iter__(self):
-		cur = self._where_query(f'''
+		cur = self._query_where(f'''
 			SELECT
 				*
 				FROM objects
@@ -320,7 +313,7 @@ class StoreSubset:
 			yield dict(json.loads(row['properties']), object_id = row['object_id'])
 
 	def __len__(self):
-		cur = self._where_query(f'''
+		cur = self._query_where(f'''
 			SELECT
 				COUNT(*)
 				FROM objects
@@ -328,3 +321,14 @@ class StoreSubset:
 		)
 
 		return cur.fetchone()[0]
+
+def _compound_node_combine(node, separator):
+	sql_terms, param_sets = zip(*node.visit_children(_QUERY_SQL_HANDLERS))
+
+	return '(' + separator.join(sql_terms) + ')', tuple(param for param_set in param_sets for param in param_set)
+
+_QUERY_SQL_HANDLERS = {
+	query.AndMatchers: lambda node: _compound_node_combine(node, ' AND '),
+	query.EqualityMatch: lambda node: (f'json_extract(properties, "$.{node.property}") = ?', (node.value,)),
+	query.Empty: lambda node: ('1=1', ()),
+}

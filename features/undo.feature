@@ -1,5 +1,5 @@
-Feature: undoing operations
-	Scenario: undoing addition
+Feature: Undoing operations
+	Scenario: Undoing addition should remove an object
 		Given an empty store
 		When we add the object "first"
 		 And commit
@@ -13,7 +13,7 @@ Feature: undoing operations
 		Then we see 1 objects
 		 And one of those objects is called "first"
 
-	Scenario: undoing deletion
+	Scenario: Undoing deletion should add an object
 		Given an empty store
 		When we add the object "first"
 		 And we add the object "second"
@@ -30,7 +30,7 @@ Feature: undoing operations
 		 And one of those objects is called "first"
 		 And one of those objects is called "second"
 
-	Scenario: undoing modification
+	Scenario: Undoing modification should restore the original object
 		Given an empty store
 		When we add the object "first"
 		 And commit
@@ -45,7 +45,7 @@ Feature: undoing operations
 		Then we see 1 objects
 		 And one of those objects is called "first"
 
-	Scenario: undoing deletion and modification in the right order
+	Scenario: Undoing deletion and modification must occur in the right order
 		Given an empty store
 		When we add the object "first"
 		 And commit
@@ -60,22 +60,7 @@ Feature: undoing operations
 		Then we see 1 objects
 		 And one of those objects is called "first"
 
-	Scenario: undoing modification
-		Given an empty store
-		When we add the object "first"
-		 And commit
-		 And we rename the object "first" to "second"
-		 And commit
-		 And we list the objects
-		Then we see 1 objects
-		 And one of those objects is called "second"
-
-		When we undo
-		 And we list the objects
-		Then we see 1 objects
-		 And one of those objects is called "first"
-
-	Scenario: undoing multiple operations
+	Scenario: Undoing multiple operations should progressively restore state
 		Given an empty store
 		When we add the object "first"
 		 And commit
@@ -97,7 +82,7 @@ Feature: undoing operations
 		Then we see 1 objects
 		 And one of those objects is called "first"
 
-	Scenario: undo should persist
+	Scenario: Undo should persist after a close/reopen
 		Given an empty store
 		When we add the object "first"
 		 And commit
@@ -110,7 +95,7 @@ Feature: undoing operations
 		Then we see 1 objects
 		 And one of those objects is called "first"
 
-	Scenario: undoing the first operation
+	Scenario: Undoing the first operation should succeed
 		Given an empty store
 		When we add the object "first"
 		 And commit
@@ -121,7 +106,7 @@ Feature: undoing operations
 		 And we list the objects
 		Then we see 0 objects
 
-	Scenario: undoing when there's nothing to undo
+	Scenario: Undoing when there's nothing to undo should silently succeed
 		Given an empty store
 		When we undo
 		# Then it does not fail
