@@ -242,18 +242,22 @@ class Store:
 		self.db.commit()
 
 	def all(self):
-		return StoreSubset(self, query.Empty())
+		return _StoreSubset(self, query.Empty())
 
 	def select(self, **params):
 		q = query.AndMatchers(*(query.EqualityMatch(k, v) for (k, v) in params.items()))
-		return StoreSubset(self, q)
+		return _StoreSubset(self, q)
+
+	def query(self, q_text: str):
+		q = query.parse(q_text)
+		return _StoreSubset(self, q)
 
 	def close(self):
 		self.db.close()
 
 ## Virtual item collection
-class StoreSubset:
-	def __init__(self, store, q):
+class _StoreSubset:
+	def __init__(self, store: Store, q: query.Node):
 		self._db = store.db
 		self._store = store
 		self._q = q
@@ -327,8 +331,16 @@ def _compound_node_combine(node, separator):
 
 	return '(' + separator.join(sql_terms) + ')', tuple(param for param_set in param_sets for param in param_set)
 
+def _query_handle_equality_match(node):
+	if isinstance(node.value, float):
+		sql_type = 'REAL'
+	else:
+		sql_type = 'TEXT'
+
+	return f'CAST(json_extract(properties, "$.{node.property}") AS {sql_type}) = CAST(? AS {sql_type})', (node.value,)
+
 _QUERY_SQL_HANDLERS = {
 	query.AndMatchers: lambda node: _compound_node_combine(node, ' AND '),
-	query.EqualityMatch: lambda node: (f'json_extract(properties, "$.{node.property}") = ?', (node.value,)),
+	query.EqualityMatch: _query_handle_equality_match,
 	query.Empty: lambda node: ('1=1', ()),
 }

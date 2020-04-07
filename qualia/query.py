@@ -18,7 +18,7 @@
 import abc
 import typing
 
-PropertyValue = typing.Union[int, float, str]
+PropertyValue = typing.Union[float, str]
 
 # These nodes form the basis of a tree, which can be created by parsers and turned into SQL queries.
 
@@ -59,3 +59,22 @@ class Empty(Node):
 ## Compound matchers
 class AndMatchers(CompoundNode):
 	pass
+
+## Parsing
+def parse(q_text):
+	import parsy as p
+
+	whitespace = p.regex('\s*')
+
+	property_name = p.regex('[A-Za-z0-9_-]+')
+	property_value = p.regex('\S+')
+
+	eq_match = whitespace >> p.seq(property_name << p.regex('\s*:\s*'), property_value).combine(EqualityMatch) << whitespace
+
+	terms = eq_match.sep_by(p.regex('\s*,?\s*'), min=1).combine(AndMatchers)
+
+	empty = p.eof.map(lambda _: Empty())
+
+	query = terms | empty
+
+	return query.parse(q_text)
