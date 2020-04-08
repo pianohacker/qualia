@@ -44,8 +44,8 @@ class CompoundNode(Node, abc.ABC):
 	def visit_children(self, handlers):
 		return [child.visit(handlers) for child in self.children]
 
-## Terminal matchers
-class EqualityMatch(Node):
+## Terminal queries
+class EqualityQuery(Node):
 	property: str
 	value: PropertyValue
 
@@ -53,7 +53,7 @@ class EqualityMatch(Node):
 		self.property = property
 		self.value = value
 
-class PhraseMatch(Node):
+class PhraseQuery(Node):
 	property: str
 	phrase: str
 
@@ -61,11 +61,21 @@ class PhraseMatch(Node):
 		self.property = property
 		self.phrase = phrase
 
+class BetweenQuery(Node):
+	property: str
+	min: float
+	max: float
+
+	def __init__(self, property, min, max):
+		self.property = property
+		self.min = min
+		self.max = max
+
 class Empty(Node):
 	pass
 
 ## Compound matchers
-class AndMatchers(CompoundNode):
+class AndQueries(CompoundNode):
 	pass
 
 ## Parsing
@@ -75,23 +85,33 @@ def parse(q_text):
 	whitespace = p.regex('\s*')
 
 	property_name = p.regex('[A-Za-z0-9_-]+').desc('property name')
-	property_value = (p.string('"') >> p.regex(r'[^"]+') << p.string('"')).desc('quoted phrase') | p.regex('[^,]+').map(lambda x: x.rstrip(' ')).desc('unquoted phrase')
+	query_number_value = p.regex('\d+(?:\.\d*)?|\.\d+').map(float).desc('number')
+	query_string_value = (p.string('"') >> p.regex(r'[^"]+') << p.string('"')).desc('quoted phrase') | p.regex('[^,]+').map(lambda x: x.rstrip(' ')).desc('unquoted phrase')
+	query_value = query_number_value | query_string_value
 
-	eq_match = (p.seq(p.regex('\s*=\s*').map(lambda _: EqualityMatch), property_value)).desc('equality match (=)')
-	phrase_match = (p.seq(p.regex('\s*:\s*').map(lambda _: PhraseMatch), property_value)).desc('phrase match (:)')
+	eq_query = p.seq(
+		p.regex('\s*=\s*').map(lambda _: EqualityQuery),
+		query_value,
+	).desc('equality match (=)')
+	phrase_query = p.seq(
+		p.regex('\s*:\s*').map(lambda _: PhraseQuery),
+		query_string_value,
+	).desc('phrase match (:)')
+	between_query = p.seq(
+		p.regex('\s*between\s*').map(lambda _: BetweenQuery),
+		query_number_value,
+		p.regex('\s*and\s*') >> query_number_value,
+	).desc('between match')
 
-	@p.generate('matcher')
-	def matcher():
+	@p.generate
+	def prop_query():
 		yield whitespace
 		prop_name = yield property_name
-		node_type, match_val = yield (eq_match | phrase_match)
+		node_type, *match_vals = yield (eq_query | phrase_query | between_query)
 		yield whitespace
-		return node_type(prop_name, match_val)
+		return node_type(prop_name, *match_vals)
 
-	terms = matcher.sep_by(p.regex('\s*,\s*'), min=1).combine(AndMatchers)
+	terms = prop_query.sep_by(p.regex('\s*,\s*'))
 
-	empty = p.eof.map(lambda _: Empty())
-
-	query = terms | empty
-
-	return query.parse(q_text)
+	q_terms = terms.parse(q_text)
+	return AndQueries(*q_terms) if q_terms else Empty()

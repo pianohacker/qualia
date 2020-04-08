@@ -65,3 +65,10 @@ Feature: query syntax
 		When we query for `name = " space six"`
 		Then we see 1 objects
 		 And one of those objects is called " space six"
+
+	Scenario: Range queries should match numerically
+		When we query for `value between 1 and 3, ordinal = yes`
+		Then we see 3 objects
+		 And one of those objects is called "first"
+		 And one of those objects is called "second"
+		 And one of those objects is called "third"

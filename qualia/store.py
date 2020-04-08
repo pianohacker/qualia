@@ -255,7 +255,7 @@ class Store:
 		return _StoreSubset(self, query.Empty())
 
 	def select(self, **params):
-		q = query.AndMatchers(*(query.EqualityMatch(k, v) for (k, v) in params.items()))
+		q = query.AndQueries(*(query.EqualityQuery(k, v) for (k, v) in params.items()))
 		return _StoreSubset(self, q)
 
 	def query(self, q_text: str):
@@ -341,7 +341,7 @@ def _compound_node_combine(node, separator):
 
 	return '(' + separator.join(sql_terms) + ')', tuple(param for param_set in param_sets for param in param_set)
 
-def _query_handle_equality_match(node):
+def _handle_equality_query(node):
 	if isinstance(node.value, float):
 		sql_type = 'REAL'
 	else:
@@ -349,12 +349,16 @@ def _query_handle_equality_match(node):
 
 	return f'CAST(json_extract(properties, "$.{node.property}") AS {sql_type}) = CAST(? AS {sql_type})', (node.value,)
 
-def _query_handle_phrase_match(node):
+def _handle_phrase_query(node):
 	return f'CAST(json_extract(properties, "$.{node.property}") AS TEXT) REGEXP ?', (r"\b" + node.phrase + r"\b",)
 
+def _handle_between_query(node):
+	return f'CAST(json_extract(properties, "$.{node.property}") AS REAL) BETWEEN ? AND ?', (node.min, node.max)
+
 _QUERY_SQL_HANDLERS = {
-	query.AndMatchers: lambda node: _compound_node_combine(node, ' AND '),
-	query.EqualityMatch: _query_handle_equality_match,
-	query.PhraseMatch: _query_handle_phrase_match,
+	query.AndQueries: lambda node: _compound_node_combine(node, ' AND '),
+	query.EqualityQuery: _handle_equality_query,
+	query.PhraseQuery: _handle_phrase_query,
+	query.BetweenQuery: _handle_between_query,
 	query.Empty: lambda node: ('1=1', ()),
 }
