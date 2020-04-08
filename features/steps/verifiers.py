@@ -5,11 +5,11 @@ from hamcrest import *
 def step_impl(context, number):
 	assert_that(context.result, has_length(number))
 
-@then('one of those objects is called "{name:w}"')
+use_step_matcher('re')
+@then('one of those objects is called "(?P<name>[^"]*)"')
 def step_impl(context, name):
 	assert_that(context.result, has_item(has_entry('name', name)))
 
-use_step_matcher('re')
 @then('`(?P<step>[^`]*)` should fail like "(?P<part_of_error>[^"]*)"')
 def step_impl(context, step, part_of_error):
 	assert_that(

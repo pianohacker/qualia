@@ -1,9 +1,9 @@
 Feature: Undoing operations
 	Scenario: Undoing addition should remove an object
 		Given an empty store
-		When we add the object "first"
+		When we add the object `name: first`
 		 And commit
-		 And we add the object "second"
+		 And we add the object `name: second`
 		 And commit
 		 And we list the objects
 		Then we see 2 objects
@@ -15,8 +15,8 @@ Feature: Undoing operations
 
 	Scenario: Undoing deletion should add an object
 		Given an empty store
-		When we add the object "first"
-		 And we add the object "second"
+		When we add the object `name: first`
+		 And we add the object `name: second`
 		 And commit
 		 And we delete the object "first"
 		 And commit
@@ -32,7 +32,7 @@ Feature: Undoing operations
 
 	Scenario: Undoing modification should restore the original object
 		Given an empty store
-		When we add the object "first"
+		When we add the object `name: first`
 		 And commit
 		 And we rename the object "first" to "second"
 		 And commit
@@ -47,7 +47,7 @@ Feature: Undoing operations
 
 	Scenario: Undoing deletion and modification must occur in the right order
 		Given an empty store
-		When we add the object "first"
+		When we add the object `name: first`
 		 And commit
 		 And we rename the object "first" to "second"
 		 And we delete the object "second"
@@ -62,11 +62,11 @@ Feature: Undoing operations
 
 	Scenario: Undoing multiple operations should progressively restore state
 		Given an empty store
-		When we add the object "first"
+		When we add the object `name: first`
 		 And commit
-		 And we add the object "second"
+		 And we add the object `name: second`
 		 And commit
-		 And we add the object "third"
+		 And we add the object `name: third`
 		 And commit
 		 And we list the objects
 		Then we see 3 objects
@@ -84,9 +84,9 @@ Feature: Undoing operations
 
 	Scenario: Undo should persist after a close/reopen
 		Given an empty store
-		When we add the object "first"
+		When we add the object `name: first`
 		 And commit
-		 And we add the object "second"
+		 And we add the object `name: second`
 		 And commit
 		 And we undo
 		 And we close the store
@@ -97,9 +97,9 @@ Feature: Undoing operations
 
 	Scenario: Undoing the first operation should succeed
 		Given an empty store
-		When we add the object "first"
+		When we add the object `name: first`
 		 And commit
-		 And we add the object "second"
+		 And we add the object `name: second`
 		 And commit
 		 And we undo
 		 And we undo

@@ -20,6 +20,7 @@ from .import common, query
 
 lazy_import(globals(), """
 	import json
+	import rure
 	import sqlite3
 """)
 
@@ -47,12 +48,21 @@ class Store:
 		# Check that the JSON1 extension is working.
 		self.db.execute('SELECT json("{}")')
 
+		# Add rure-based `regexp()` implementation.
+		self._add_rure_regexp()
+
 		# This replaces the usual tuple format for rows with a convenient dict-like object.
 		self.db.row_factory = sqlite3.Row
 		self._upgrade_if_needed()
 
 		# This indicates whether there have been changes since the last checkpoint.
 		self.has_changes = False
+
+	def _add_rure_regexp(self):
+		def rure_regexp(pattern, value):
+			return rure.is_match(pattern, value)
+
+		self.db.create_function('REGEXP', 2, rure_regexp)
 
 	def _upgrade_if_needed(self):
 		# We check the version of the database and upgrade it if necessary.
@@ -339,8 +349,12 @@ def _query_handle_equality_match(node):
 
 	return f'CAST(json_extract(properties, "$.{node.property}") AS {sql_type}) = CAST(? AS {sql_type})', (node.value,)
 
+def _query_handle_phrase_match(node):
+	return f'CAST(json_extract(properties, "$.{node.property}") AS TEXT) REGEXP ?', (r"\b" + node.phrase + r"\b",)
+
 _QUERY_SQL_HANDLERS = {
 	query.AndMatchers: lambda node: _compound_node_combine(node, ' AND '),
 	query.EqualityMatch: _query_handle_equality_match,
+	query.PhraseMatch: _query_handle_phrase_match,
 	query.Empty: lambda node: ('1=1', ()),
 }

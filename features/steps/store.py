@@ -18,20 +18,6 @@ def step_impl(context):
 
 	context.store = qualia.open(path.join(context.store_dir, 'empty.qualia'))
 
-@given('a store seeded with numbers')
-def step_impl(context):
-	context.execute_steps('given an empty store')
-
-	context.store.add(name = 'first', value = 1, ordinal = "yes")
-	context.store.add(name = 'second', value = 2, ordinal = "yes")
-	context.store.add(name = 'third', value = 3, ordinal = "yes")
-	context.store.add(name = 'fourth', value = 4, ordinal = "yes")
-	context.store.add(name = 'one', value = 1, ordinal = "no")
-	context.store.add(name = 'two', value = 2, ordinal = "no")
-	context.store.add(name = 'three', value = 3, ordinal = "no")
-	context.store.add(name = 'four', value = 4, ordinal = "no")
-	context.store.commit()
-
 @when('commit')
 def step_impl(context):
 	context.store.commit()

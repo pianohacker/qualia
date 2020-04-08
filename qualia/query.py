@@ -53,6 +53,14 @@ class EqualityMatch(Node):
 		self.property = property
 		self.value = value
 
+class PhraseMatch(Node):
+	property: str
+	phrase: str
+
+	def __init__(self, property, phrase):
+		self.property = property
+		self.phrase = phrase
+
 class Empty(Node):
 	pass
 
@@ -66,12 +74,21 @@ def parse(q_text):
 
 	whitespace = p.regex('\s*')
 
-	property_name = p.regex('[A-Za-z0-9_-]+')
-	property_value = p.regex('\S+')
+	property_name = p.regex('[A-Za-z0-9_-]+').desc('property name')
+	property_value = (p.string('"') >> p.regex(r'[^"]+') << p.string('"')).desc('quoted phrase') | p.regex('[^,]+').map(lambda x: x.rstrip(' ')).desc('unquoted phrase')
 
-	eq_match = whitespace >> p.seq(property_name << p.regex('\s*:\s*'), property_value).combine(EqualityMatch) << whitespace
+	eq_match = (p.seq(p.regex('\s*=\s*').map(lambda _: EqualityMatch), property_value)).desc('equality match (=)')
+	phrase_match = (p.seq(p.regex('\s*:\s*').map(lambda _: PhraseMatch), property_value)).desc('phrase match (:)')
 
-	terms = eq_match.sep_by(p.regex('\s*,?\s*'), min=1).combine(AndMatchers)
+	@p.generate('matcher')
+	def matcher():
+		yield whitespace
+		prop_name = yield property_name
+		node_type, match_val = yield (eq_match | phrase_match)
+		yield whitespace
+		return node_type(prop_name, match_val)
+
+	terms = matcher.sep_by(p.regex('\s*,\s*'), min=1).combine(AndMatchers)
 
 	empty = p.eof.map(lambda _: Empty())
 
