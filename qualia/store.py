@@ -336,29 +336,34 @@ class _StoreSubset:
 
 		return cur.fetchone()[0]
 
-def _compound_node_combine(node, separator):
-	sql_terms, param_sets = zip(*node.visit_children(_QUERY_SQL_HANDLERS))
+_QUERY_SQL_HANDLERS, _query_sql_handler = common.registry_with_decorator()
 
-	return '(' + separator.join(sql_terms) + ')', tuple(param for param_set in param_sets for param in param_set)
+def _generate_property_extractor(property_name, sql_type):
+	return f'CAST(json_extract(properties, "$.{property_name}") AS {sql_type})'
 
-def _handle_equality_query(node):
+@_query_sql_handler(query.EqualityQuery)
+def _sql_impl(node):
 	if isinstance(node.value, float):
 		sql_type = 'REAL'
 	else:
 		sql_type = 'TEXT'
 
-	return f'CAST(json_extract(properties, "$.{node.property}") AS {sql_type}) = CAST(? AS {sql_type})', (node.value,)
+	return f'{_generate_property_extractor(node.property, sql_type)} = CAST(? AS {sql_type})', (node.value,)
 
-def _handle_phrase_query(node):
-	return f'CAST(json_extract(properties, "$.{node.property}") AS TEXT) REGEXP ?', (r"\b" + node.phrase + r"\b",)
+@_query_sql_handler(query.PhraseQuery)
+def _sql_impl(node):
+	return f'{_generate_property_extractor(node.property, "TEXT")} REGEXP ?', (r"\b" + node.phrase + r"\b",)
 
-def _handle_between_query(node):
-	return f'CAST(json_extract(properties, "$.{node.property}") AS REAL) BETWEEN ? AND ?', (node.min, node.max)
+@_query_sql_handler(query.BetweenQuery)
+def _sql_impl(node):
+	return f'{_generate_property_extractor(node.property, "REAL")} BETWEEN ? AND ?', (node.min, node.max)
 
-_QUERY_SQL_HANDLERS = {
-	query.AndQueries: lambda node: _compound_node_combine(node, ' AND '),
-	query.EqualityQuery: _handle_equality_query,
-	query.PhraseQuery: _handle_phrase_query,
-	query.BetweenQuery: _handle_between_query,
-	query.Empty: lambda node: ('1=1', ()),
-}
+@_query_sql_handler(query.AndQueries)
+def _sql_impl(node):
+	sql_terms, param_sets = zip(*node.visit_children(_QUERY_SQL_HANDLERS))
+
+	return '(' + ' AND '.join(sql_terms) + ')', tuple(param for param_set in param_sets for param in param_set)
+
+@_query_sql_handler(query.Empty)
+def _sql_impl(node):
+	return '1=1', ()

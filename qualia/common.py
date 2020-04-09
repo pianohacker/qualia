@@ -54,3 +54,20 @@ class InvalidFieldValue(Exception):
 
 class UndoFailedError(Exception):
 	pass
+
+## Utility functions
+# Generates a dict and a decorator that inserts items into that dict. Useful for handler registries.
+
+def registry_with_decorator():
+	registry = dict()
+
+	def decorator(key):
+		def inner(func):
+			registry[key] = func
+
+			return func
+
+		return inner
+
+	return registry, decorator
+
