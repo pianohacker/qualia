@@ -19,6 +19,7 @@ from .lazy_import import lazy_import
 from .import common, query
 
 lazy_import(globals(), """
+	import datetime
 	import json
 	import rure
 	import sqlite3
@@ -272,6 +273,7 @@ class _StoreSubset:
 		self._store = store
 		self._q = q
 
+		print(q.visit(_QUERY_SQL_HANDLERS))
 		self._where_clause, self._where_params = q.visit(_QUERY_SQL_HANDLERS)
 
 	def _query_where(self, inner_query, *other_params):
@@ -356,7 +358,14 @@ def _sql_impl(node):
 
 @_query_sql_handler(query.BetweenQuery)
 def _sql_impl(node):
-	return f'{_generate_property_extractor(node.property, "REAL")} BETWEEN ? AND ?', (node.min, node.max)
+	if isinstance(node.min, float):
+		sql_type = 'REAL'
+		min_value, max_value = node.min, node.max
+	elif isinstance(node.min, datetime.date):
+		sql_type = 'TEXT'
+		min_value, max_value = node.min.isoformat(), node.max.isoformat()
+
+	return f'{_generate_property_extractor(node.property, sql_type)} BETWEEN ? AND ?', (min_value, max_value)
 
 @_query_sql_handler(query.AndQueries)
 def _sql_impl(node):

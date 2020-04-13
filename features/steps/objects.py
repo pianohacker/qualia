@@ -26,3 +26,8 @@ PROPERTY = r'[\w-]+:\s*(?:"[^"]*"|[^,]*)'
 def step_impl(context, object_description):
 	properties = re.findall(PROPERTY_WITH_GROUPS, object_description)
 	context.store.add(**dict((k, v.strip('"')) for (k, v) in properties))
+
+@when(r'we add the following objects')
+def step_impl(context):
+	for row in context.table:
+		context.store.add(**dict(row.items()))

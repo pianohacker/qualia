@@ -16,6 +16,7 @@
 # along with Qualia. If not, see <http://www.gnu.org/licenses/>.
 
 import abc
+import datetime
 import typing
 
 PropertyValue = typing.Union[float, str]
@@ -82,36 +83,49 @@ class AndQueries(CompoundNode):
 def parse(q_text):
 	import parsy as p
 
-	whitespace = p.regex('\s*')
+	whitespace = p.regex('\s+')
+	optional_whitespace = p.regex('\s*')
+	term_sep = p.regex('\s*,\s*')
+
+	@p.generate
+	def query_date_value():
+		year = yield (p.regex(r'\d{4}') << p.string('-')).map(int)
+		month = yield (p.regex(r'\d{2}') << p.string('-')).map(int)
+		day = yield p.regex(r'\d{2}').map(int)
+
+		try:
+			return datetime.date(year, month, day)
+		except ValueError as e:
+			return p.fail(str(e))
 
 	property_name = p.regex('[A-Za-z0-9_-]+').desc('property name')
-	query_number_value = p.regex('\d+(?:\.\d*)?|\.\d+').map(float).desc('number')
+	query_number_value = (p.regex('\d+(?:\.\d*)?|\.\d+').map(float) << p.peek(term_sep | whitespace | p.eof)).desc('number')
 	query_string_value = (p.string('"') >> p.regex(r'[^"]+') << p.string('"')).desc('quoted phrase') | p.regex('[^,]+').map(lambda x: x.rstrip(' ')).desc('unquoted phrase')
 	query_value = query_number_value | query_string_value
 
 	eq_query = p.seq(
-		p.regex('\s*=\s*').map(lambda _: EqualityQuery),
+		p.regex('\s*=\s*').map(lambda _: EqualityQuery).desc('equality match (=)'),
 		query_value,
-	).desc('equality match (=)')
+	)
 	phrase_query = p.seq(
-		p.regex('\s*:\s*').map(lambda _: PhraseQuery),
+		p.regex('\s*:\s*').map(lambda _: PhraseQuery).desc('phrase match (:)'),
 		query_string_value,
-	).desc('phrase match (:)')
+	)
 	between_query = p.seq(
-		p.regex('\s*between\s*').map(lambda _: BetweenQuery),
-		query_number_value,
-		p.regex('\s*and\s*') >> query_number_value,
-	).desc('between match')
+		p.regex('\s*between\s*').map(lambda _: BetweenQuery).desc('between match'),
+		(query_date_value | query_number_value),
+		p.regex('\s*and\s*').desc('and') >> (query_date_value | query_number_value),
+	)
 
 	@p.generate
 	def prop_query():
-		yield whitespace
+		yield optional_whitespace
 		prop_name = yield property_name
 		node_type, *match_vals = yield (eq_query | phrase_query | between_query)
-		yield whitespace
+		yield optional_whitespace
 		return node_type(prop_name, *match_vals)
 
-	terms = prop_query.sep_by(p.regex('\s*,\s*'))
+	terms = prop_query.sep_by(term_sep)
 
 	q_terms = terms.parse(q_text)
 	return AndQueries(*q_terms) if q_terms else Empty()
