@@ -16,7 +16,7 @@
 # along with Qualia. If not, see <http://www.gnu.org/licenses/>.
 
 from .lazy_import import lazy_import
-from .import common, query
+from .import common, parser, query
 
 lazy_import(globals(), """
 	import datetime
@@ -260,7 +260,7 @@ class Store:
 		return _StoreSubset(self, q)
 
 	def query(self, q_text: str):
-		q = query.parse(q_text)
+		q = parser.parse_query(q_text)
 		return _StoreSubset(self, q)
 
 	def close(self):
@@ -354,7 +354,7 @@ def _sql_impl(node):
 
 @_query_sql_handler(query.PhraseQuery)
 def _sql_impl(node):
-	return f'{_generate_property_extractor(node.property, "TEXT")} REGEXP ?', (r"\b" + node.phrase + r"\b",)
+	return f'{_generate_property_extractor(node.property, "TEXT")} REGEXP ?', (rf"\b{node.phrase}\b",)
 
 @_query_sql_handler(query.BetweenQuery)
 def _sql_impl(node):
