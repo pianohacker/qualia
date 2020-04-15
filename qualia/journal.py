@@ -1,30 +1,17 @@
-# Copyright (c) 2015 Jesse Weaver.
+# Copyright (c) 2020 Jesse Weaver.
 #
 # This file is part of Qualia.
 # 
-# Qualia is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# 
-# Qualia is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License
-# along with Qualia. If not, see <http://www.gnu.org/licenses/>.
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 # This is the implementation of the journal, which allows for recovery and limited undo.
 #
 ## Imports
-from .lazy_import import lazy_import
-
-lazy_import(globals(), """
-	import datetime
-	import pickle
-	import sqlite3
-""")
+import datetime
+import pickle
+import sqlite3
 
 ## Journal
 # The journal is implemented on top of a simple SQLite database, which gives us a convenient

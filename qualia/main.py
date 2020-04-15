@@ -1,36 +1,24 @@
-# Copyright (c) 2015 Jesse Weaver.
+# Copyright (c) 2020 Jesse Weaver.
 #
 # This file is part of Qualia.
 # 
-# Qualia is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# 
-# Qualia is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License
-# along with Qualia. If not, see <http://www.gnu.org/licenses/>.
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 ## Imports
 from . import common, config, conversion, database
-from .lazy_import import lazy_import
 
 # While we import most modules lazily, some things are always needed.
 import argparse
 import pkg_resources
 import sys
 
-lazy_import(globals(), """
-	import collections
-	import functools
-	import os
-	import tempfile
-	import shutil
-""")
+import collections
+import functools
+import os
+import tempfile
+import shutil
 
 ## Utility functions
 # A decorator that automatically places a checkpoint after its decorated function runs if it does
