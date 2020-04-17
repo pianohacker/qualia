@@ -47,27 +47,27 @@ Feature: query syntax
 		 And one of those objects is called " space six"
 
 	Scenario: Exact queries should only match the exact text
-		When we query for `name = one`
+		When we query for `name: exactly one`
 		Then we see 1 objects
 		 And one of those objects is called "one"
 
-		When we query for `name = hundred`
+		When we query for `name: exactly hundred`
 		Then we see 0 objects
 
-		When we query for `name = five hundred`
+		When we query for `name: exactly five hundred`
 		Then we see 1 objects
 		 And one of those objects is called "five hundred"
 
 	Scenario: Exact queries should be specific about whitespace
-		When we query for `name = "space six"`
+		When we query for `name: exactly "space six"`
 		Then we see 0 objects
 
-		When we query for `name = " space six"`
+		When we query for `name: exactly " space six"`
 		Then we see 1 objects
 		 And one of those objects is called " space six"
 
 	Scenario: Range queries should match numerically
-		When we query for `value between 1 and 3, ordinal = yes`
+		When we query for `value: between 1 and 3, ordinal: yes`
 		Then we see 3 objects
 		 And one of those objects is called "first"
 		 And one of those objects is called "second"

@@ -7,6 +7,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import abc
+import datetime
 import typing
 
 PropertyValue = typing.Union[float, str]
@@ -52,7 +53,17 @@ class PhraseQuery(Node):
 		self.property = property
 		self.phrase = phrase
 
-class BetweenQuery(Node):
+class BetweenDatesQuery(Node):
+	property: str
+	min: datetime.date
+	max: datetime.date
+
+	def __init__(self, property, min, max):
+		self.property = property
+		self.min = min
+		self.max = max
+
+class BetweenNumbersQuery(Node):
 	property: str
 	min: float
 	max: float
