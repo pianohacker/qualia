@@ -10,8 +10,6 @@ import abc
 import datetime
 import typing
 
-PropertyValue = typing.Union[float, str]
-
 # These nodes form the basis of a tree, which can be created by parsers and turned into SQL queries.
 
 ## Base types
@@ -39,7 +37,7 @@ class CompoundNode(Node, abc.ABC):
 ## Terminal queries
 class EqualityQuery(Node):
 	property: str
-	value: PropertyValue
+	value: str
 
 	def __init__(self, property, value):
 		self.property = property

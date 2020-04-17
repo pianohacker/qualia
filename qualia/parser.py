@@ -39,10 +39,11 @@ def _regex_groups(pattern, flags = 0):
 	return regex_groups_parser
 
 _query_number_value = p.regex('\d+(?:\.\d*)?|\.\d+').map(float).desc('number')
-_query_string_value = (
+_query_phrase_value = (
 	_regex_groups(r'"([^"]+)"[^,]*').desc('quoted phrase') |
 	p.regex('[^,]+').map(lambda x: x.rstrip(' ')).desc('unquoted phrase')
 )
+
 @p.generate
 def _query_date_value():
 	year = yield (p.regex(r'\d{4}') << p.string('-')).map(int)
@@ -69,7 +70,7 @@ def parse_query(q_text):
 	# This construction parses the query value as a basic string first, to find out the extent of
 	# the query value, then reparses only the part that was matched. This allows the underlying
 	# parsers to more strictly match values (which disambiguates numbers and dates better).
-	def query_value_part(*, delimiter = r',|$', parser = _query_string_value):
+	def query_value_part(*, delimiter = r',|$', parser = _query_phrase_value):
 		@p.Parser
 		def query_value_part_impl(stream, index):
 			string_result = p.regex(rf'("[^"]+".*?|.+?)(?={delimiter})')(stream, index)
@@ -99,7 +100,7 @@ def parse_query(q_text):
 
 	@p.generate
 	def phrase_query():
-		phrase = yield _query_string_value
+		phrase = yield _query_phrase_value
 
 		return query.PhraseQuery, phrase
 

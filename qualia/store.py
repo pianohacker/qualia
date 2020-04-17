@@ -328,29 +328,24 @@ class _StoreSubset:
 
 _QUERY_SQL_HANDLERS, _query_sql_handler = common.registry_with_decorator()
 
-def _generate_property_extractor(property_name, sql_type):
-	return f'CAST(json_extract(properties, "$.{property_name}") AS {sql_type})'
+def _property_extractor(node, sql_type):
+	return f'CAST(json_extract(properties, "$.{node.property}") AS {sql_type})'
 
 @_query_sql_handler(query.EqualityQuery)
 def _sql_impl(node):
-	if isinstance(node.value, float):
-		sql_type = 'REAL'
-	else:
-		sql_type = 'TEXT'
-
-	return f'{_generate_property_extractor(node.property, sql_type)} = CAST(? AS {sql_type})', (node.value,)
+	return f'{_property_extractor(node, "TEXT")} = ?', (node.value,)
 
 @_query_sql_handler(query.PhraseQuery)
 def _sql_impl(node):
-	return f'{_generate_property_extractor(node.property, "TEXT")} REGEXP ?', (rf"\b{node.phrase}\b",)
+	return f'{_property_extractor(node, "TEXT")} REGEXP ?', (rf"\b{node.phrase}\b",)
 
 @_query_sql_handler(query.BetweenDatesQuery)
 def _sql_impl(node):
-	return f'{_generate_property_extractor(node.property, "TEXT")} BETWEEN ? AND ?', (node.min.isoformat(), node.max.isoformat())
+	return f'{_property_extractor(node, "TEXT")} BETWEEN ? AND ?', (node.min.isoformat(), node.max.isoformat())
 
 @_query_sql_handler(query.BetweenNumbersQuery)
 def _sql_impl(node):
-	return f'{_generate_property_extractor(node.property, "REAL")} BETWEEN ? AND ?', (node.min, node.max)
+	return f'{_property_extractor(node, "REAL")} BETWEEN ? AND ?', (node.min, node.max)
 
 @_query_sql_handler(query.AndQueries)
 def _sql_impl(node):
