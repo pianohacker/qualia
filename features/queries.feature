@@ -72,3 +72,8 @@ Feature: query syntax
 		 And one of those objects is called "first"
 		 And one of those objects is called "second"
 		 And one of those objects is called "third"
+
+	Scenario: It should be possible to query by object ID
+		When we query for `object_id: 1`
+		Then we see 1 objects
+		 And one of those objects is called "first"

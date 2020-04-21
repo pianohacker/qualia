@@ -49,7 +49,7 @@ class Store:
 
 	def _add_rure_regexp(self):
 		def rure_regexp(pattern, value):
-			return rure.is_match(pattern, value)
+			return rure.is_match(str(pattern), str(value))
 
 		self.db.create_function('REGEXP', 2, rure_regexp)
 
@@ -328,7 +328,12 @@ class _StoreSubset:
 _QUERY_SQL_HANDLERS, _query_sql_handler = common.registry_with_decorator()
 
 def _property_extractor(node, sql_type):
-	return f'CAST(json_extract(properties, "$.{node.property}") AS {sql_type})'
+	if node.property == 'object_id':
+		inner = 'object_id'
+	else:
+		inner = f'json_extract(properties, "$.{node.property}")'
+
+	return f'CAST({inner} AS {sql_type})'
 
 @_query_sql_handler(query.EqualityQuery)
 def _sql_impl(node):
