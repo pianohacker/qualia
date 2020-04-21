@@ -261,7 +261,6 @@ class _StoreSubset:
 		self._store = store
 		self._q = q
 
-		print(q.visit(_QUERY_SQL_HANDLERS))
 		self._where_clause, self._where_params = q.visit(_QUERY_SQL_HANDLERS)
 
 	def _query_where(self, inner_query, *other_params):

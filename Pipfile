@@ -6,11 +6,8 @@ verify_ssl = true
 [dev-packages]
 coverage = "*"
 
-[packages]
-behave = "*"
-pyhamcrest = "*"
-parsy = "*"
-rure = "*"
-
 [requires]
 python_version = "3.7"
+
+[packages]
+qualia = {editable = true,path = "."}
