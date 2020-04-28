@@ -341,7 +341,7 @@ def _sql_impl(node):
 
 @_query_sql_handler(query.PhraseQuery)
 def _sql_impl(node):
-	return f'{_property_extractor(node, "TEXT")} REGEXP ?', (rf"\b{node.phrase}\b",)
+	return f'{_property_extractor(node, "TEXT")} REGEXP ?', (rf"(?i)\b{node.phrase}\b",)
 
 @_query_sql_handler(query.BetweenDatesQuery)
 def _sql_impl(node):

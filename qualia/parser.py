@@ -62,6 +62,9 @@ def _lexeme(s):
 
 ## Parsing
 def parse_query(q_text):
+	if isinstance(q_text, query.Node):
+		return q_text
+
 	whitespace = p.regex('\s+')
 	term_sep = _lexeme(',')
 

@@ -46,12 +46,24 @@ Feature: query syntax
 		Then we see 1 objects
 		 And one of those objects is called " space six"
 
+	Scenario: Phrase queries should be case insensitive
+		When we query for `name: Hundred`
+		Then we see 1 objects
+		 And one of those objects is called "five hundred"
+
+		When we query for `name: SPACE`
+		Then we see 1 objects
+		 And one of those objects is called " space six"
+
 	Scenario: Exact queries should only match the exact text
 		When we query for `name: exactly one`
 		Then we see 1 objects
 		 And one of those objects is called "one"
 
 		When we query for `name: exactly hundred`
+		Then we see 0 objects
+
+		When we query for `name: exactly FIVE HUNDRED`
 		Then we see 0 objects
 
 		When we query for `name: exactly five hundred`
