@@ -2,3 +2,9 @@ Qualia.egg-info/*
 **/__pycache__/*
 build/*
 dist/*
+
+
+#Added by cargo
+
+/target
+Cargo.lock
