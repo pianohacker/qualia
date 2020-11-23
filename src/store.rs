@@ -8,11 +8,24 @@ pub type Result<T, E = StoreError> = Result_<T, E>;
 
 #[derive(Error, Debug)]
 pub enum StoreError {
-    #[error("could not open store")]
-    Open(#[from] rusqlite::Error),
+    #[error("database error")]
+    Sqlite(#[from] rusqlite::Error),
 
     #[error("could not de/serialize object")]
     Serialization(#[from] serde_json::Error),
+}
+
+trait AsStoreResult<T> {
+    fn as_store_result(self) -> Result<T>;
+}
+
+impl<T, E> AsStoreResult<T> for Result_<T, E>
+where
+    E: Into<StoreError>,
+{
+    fn as_store_result(self) -> Result<T> {
+        self.map_err(|e| e.into())
+    }
 }
 
 pub type Object = HashMap<String, serde_json::Value>;
@@ -113,6 +126,20 @@ impl<'a> Collection<'a> {
             .prepare("SELECT COUNT(*) FROM objects")?
             .query_row(params![], |row| row.get::<usize, i64>(0))? as usize)
     }
+
+    pub fn iter(&self) -> Result<impl Iterator<Item = Object> + 'a> {
+        Ok(self
+            .conn
+            .prepare("SELECT properties FROM objects")?
+            .query_and_then(params![], |row| row.get::<usize, String>(0))?
+            .map(|r| {
+                r.as_store_result().and_then(|serialized_object| {
+                    serde_json::from_str(&serialized_object).as_store_result()
+                })
+            })
+            .collect::<Result<Vec<Object>>>()?
+            .into_iter())
+    }
 }
 
 #[cfg(test)]
@@ -149,7 +176,14 @@ mod tests {
         let test_dir = test_dir();
         let mut store = open_store(&test_dir, "store.qualia");
 
-        store.add(mkobject(&[("a", "b"), ("c", "d")]));
-        assert_eq!(store.all().len().unwrap(), 1);
+        store.add(mkobject(&[("a", "b"), ("c", "d")])).unwrap();
+
+        let all = store.all();
+
+        assert_eq!(all.len().unwrap(), 1);
+        assert_eq!(
+            all.iter().unwrap().collect::<Vec<Object>>(),
+            vec![mkobject(&[("a", "b"), ("c", "d")])]
+        );
     }
 }
