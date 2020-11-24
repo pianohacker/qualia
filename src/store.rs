@@ -124,6 +124,8 @@ impl<'a> Collection<'a> {
         Ok(self
             .conn
             .prepare("SELECT COUNT(*) FROM objects")?
+            // This workaround can be removed when https://github.com/rusqlite/rusqlite/issues/700
+            // is closed
             .query_row(params![], |row| row.get::<usize, i64>(0))? as usize)
     }
 
@@ -163,6 +165,15 @@ mod tests {
             .collect()
     }
 
+    fn sort_objects(objects: &mut Vec<Object>) {
+        objects.sort_by_key(|o| {
+            o.get("name")
+                .and_then(|v| Some(v.as_str().unwrap_or("")))
+                .unwrap_or("")
+                .to_string()
+        })
+    }
+
     #[test]
     fn new_store_is_empty() {
         assert_eq!(
@@ -172,18 +183,26 @@ mod tests {
     }
 
     #[test]
-    fn added_object_can_be_found() {
+    fn added_objects_can_be_found() {
         let test_dir = test_dir();
         let mut store = open_store(&test_dir, "store.qualia");
 
-        store.add(mkobject(&[("a", "b"), ("c", "d")])).unwrap();
+        store.add(mkobject(&[("name", "b"), ("c", "d")])).unwrap();
+        store.add(mkobject(&[("name", "d"), ("c", "f")])).unwrap();
+        store.add(mkobject(&[("name", "c"), ("c", "e")])).unwrap();
 
         let all = store.all();
 
-        assert_eq!(all.len().unwrap(), 1);
+        assert_eq!(all.len().unwrap(), 3);
+        let mut all_objects = all.iter().unwrap().collect::<Vec<Object>>();
+        sort_objects(&mut all_objects);
         assert_eq!(
-            all.iter().unwrap().collect::<Vec<Object>>(),
-            vec![mkobject(&[("a", "b"), ("c", "d")])]
+            all_objects,
+            vec![
+                mkobject(&[("name", "b"), ("c", "d")]),
+                mkobject(&[("name", "c"), ("c", "e")]),
+                mkobject(&[("name", "d"), ("c", "f")])
+            ],
         );
     }
 }
