@@ -68,25 +68,25 @@ impl Store {
         // We use `AUTOINCREMENT` on the objects table so that IDs are not reused.
         let updates = [
             "
-                        CREATE TABLE objects (
-                                object_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                properties TEXT
-                        );
-                ",
+                CREATE TABLE objects (
+                    object_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    properties TEXT
+                );
+            ",
             "
-                        CREATE TABLE object_changes (
-                                serial INTEGER PRIMARY KEY,
-                                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                object_id INTEGER,
-                                action TEXT,
-                                previous TEXT
-                        );
-                        CREATE TABLE checkpoints (
-                                checkpoint_id INTEGER PRIMARY KEY,
-                                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                serial INTEGER
-                        );
-                ",
+                CREATE TABLE object_changes (
+                    serial INTEGER PRIMARY KEY,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    object_id INTEGER,
+                    action TEXT,
+                    previous TEXT
+                );
+                CREATE TABLE checkpoints (
+                    checkpoint_id INTEGER PRIMARY KEY,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    serial INTEGER
+                );
+            ",
         ];
 
         // We set the `user_version` after each update to ensure updates are not applied twice if one
