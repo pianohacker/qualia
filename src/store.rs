@@ -4,6 +4,8 @@ use std::path::Path;
 use std::result::Result as Result_;
 use thiserror::Error;
 
+use super::Query;
+
 pub type Result<T, E = StoreError> = Result_<T, E>;
 
 #[derive(Error, Debug)]
@@ -101,7 +103,10 @@ impl Store {
     }
 
     pub fn all(&self) -> Collection {
-        Collection { conn: &self.conn }
+        Collection {
+            conn: &self.conn,
+            query: Query::Empty,
+        }
     }
 
     pub fn add(&mut self, object: Object) -> Result<()> {
@@ -117,6 +122,7 @@ impl Store {
 
 pub struct Collection<'a> {
     conn: &'a Connection,
+    query: Query,
 }
 
 impl<'a> Collection<'a> {
