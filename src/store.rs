@@ -1,4 +1,7 @@
+//! A document store with a flexible query language and built-in undo support.
+
 use rusqlite::{params, Connection};
+use serde_json::value::Number;
 use std::collections::HashMap;
 use std::path::Path;
 use std::result::Result as Result_;
@@ -138,12 +141,24 @@ impl<'a> Collection<'a> {
     pub fn iter(&self) -> Result<impl Iterator<Item = Object> + 'a> {
         Ok(self
             .conn
-            .prepare("SELECT properties FROM objects")?
-            .query_and_then(params![], |row| row.get::<usize, String>(0))?
-            .map(|r| {
-                r.as_store_result().and_then(|serialized_object| {
-                    serde_json::from_str(&serialized_object).as_store_result()
-                })
+            .prepare("SELECT object_id, properties FROM objects")?
+            .query_and_then(params![], |row| {
+                Ok((row.get::<usize, i64>(0)?, row.get::<usize, String>(1)?))
+            })?
+            .map(|r: rusqlite::Result<(i64, String)>| {
+                r.as_store_result()
+                    .and_then(|(object_id, serialized_object)| {
+                        let mut object =
+                            serde_json::from_str::<Object>(&serialized_object).as_store_result()?;
+
+                        // TODO: this is a clear cut sign that we cannot rely on JSON for our value
+                        // semantics
+                        object.insert(
+                            "object-id".to_string(),
+                            serde_json::Value::Number(Number::from(object_id)),
+                        );
+                        Ok(object)
+                    })
             })
             .collect::<Result<Vec<Object>>>()?
             .into_iter())
@@ -153,6 +168,7 @@ impl<'a> Collection<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use tempdir::TempDir;
 
     fn open_store(tempdir: &TempDir, name: &str) -> Store {
@@ -163,12 +179,19 @@ mod tests {
         TempDir::new("qualia-store").unwrap()
     }
 
-    fn mkobject<'a>(proplist: &'a [(&'a str, &'a str)]) -> Object {
-        proplist
+    fn mkobject_(proplist: serde_json::Value) -> Object {
+        let proplist_map = proplist.as_object().unwrap();
+
+        proplist_map
             .iter()
-            .cloned()
-            .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.to_string())))
+            .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
+    }
+
+    macro_rules! mkobject {
+        ( $($x:tt)* ) => {
+            mkobject_(json!({ $($x)* }))
+        };
     }
 
     fn sort_objects(objects: &mut Vec<Object>) {
@@ -193,9 +216,9 @@ mod tests {
         let test_dir = test_dir();
         let mut store = open_store(&test_dir, "store.qualia");
 
-        store.add(mkobject(&[("name", "b"), ("c", "d")])).unwrap();
-        store.add(mkobject(&[("name", "d"), ("c", "f")])).unwrap();
-        store.add(mkobject(&[("name", "c"), ("c", "e")])).unwrap();
+        store.add(mkobject!("name": "b", "c": "d")).unwrap();
+        store.add(mkobject!("name": "d", "c": "f")).unwrap();
+        store.add(mkobject!("name": "c", "c": "e")).unwrap();
 
         let all = store.all();
 
@@ -205,9 +228,9 @@ mod tests {
         assert_eq!(
             all_objects,
             vec![
-                mkobject(&[("name", "b"), ("c", "d")]),
-                mkobject(&[("name", "c"), ("c", "e")]),
-                mkobject(&[("name", "d"), ("c", "f")])
+                mkobject!("name": "b", "c": "d", "object-id": 1),
+                mkobject!("name": "c", "c": "e", "object-id": 3),
+                mkobject!("name": "d", "c": "f", "object-id": 2)
             ],
         );
     }
