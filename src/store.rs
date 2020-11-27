@@ -1,12 +1,11 @@
 //! A document store with a flexible query language and built-in undo support.
 
 use rusqlite::{params, Connection};
-use serde_json::value::Number;
-use std::collections::HashMap;
 use std::path::Path;
 use std::result::Result as Result_;
 use thiserror::Error;
 
+use crate::object::*;
 use crate::query;
 
 pub type Result<T, E = StoreError> = Result_<T, E>;
@@ -32,8 +31,6 @@ where
         self.map_err(|e| e.into())
     }
 }
-
-pub type Object = HashMap<String, serde_json::Value>;
 
 pub struct Store {
     conn: Connection,
@@ -171,12 +168,7 @@ impl<'a> Collection<'a> {
                         let mut object =
                             serde_json::from_str::<Object>(&serialized_object).as_store_result()?;
 
-                        // TODO: this is a clear cut sign that we cannot rely on JSON for our value
-                        // semantics
-                        object.insert(
-                            "object-id".to_string(),
-                            serde_json::Value::Number(Number::from(object_id)),
-                        );
+                        object.insert("object-id".to_string(), PropValue::Number(object_id as f64));
                         Ok(object)
                     })
             })
@@ -206,7 +198,7 @@ mod tests {
 
         proplist_map
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            .map(|(k, v)| (k.clone(), PropValue::from(v)))
             .collect()
     }
 
@@ -219,9 +211,10 @@ mod tests {
     fn sort_objects(objects: &mut Vec<Object>) {
         objects.sort_by_key(|o| {
             o.get("name")
-                .and_then(|v| Some(v.as_str().unwrap_or("")))
-                .unwrap_or("")
-                .to_string()
+                .expect("test objects should have a name")
+                .as_str()
+                .expect("`name` of test objects should be a string")
+                .clone()
         })
     }
 

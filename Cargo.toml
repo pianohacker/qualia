@@ -10,5 +10,5 @@ edition = "2018"
 rusqlite = "0.24" # Ergonomic wrapper for SQLite
 thiserror = "1.0" # derive(Error)
 tempdir = "0.3" # A library for managing a temporary directory and deleting all contents when it's dropped.
-serde = "1.0" # A generic serialization/deserialization framework
+serde = { version = "1.0", features = ["derive"] } # A generic serialization/deserialization framework
 serde_json = "1.0" # A JSON serialization file format
