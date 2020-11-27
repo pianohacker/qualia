@@ -7,7 +7,7 @@ use std::path::Path;
 use std::result::Result as Result_;
 use thiserror::Error;
 
-use super::Query;
+use crate::query;
 
 pub type Result<T, E = StoreError> = Result_<T, E>;
 
@@ -108,7 +108,14 @@ impl Store {
     pub fn all(&self) -> Collection {
         Collection {
             conn: &self.conn,
-            query: Query::Empty,
+            query: Box::new(query::Empty {}),
+        }
+    }
+
+    pub fn query(&self, query: Box<dyn query::QueryNode>) -> Collection {
+        Collection {
+            conn: &self.conn,
+            query,
         }
     }
 
@@ -125,26 +132,39 @@ impl Store {
 
 pub struct Collection<'a> {
     conn: &'a Connection,
-    query: Query,
+    query: Box<dyn query::QueryNode>,
 }
 
 impl<'a> Collection<'a> {
+    fn prepare_with_query(
+        &self,
+        prefix: &str,
+    ) -> Result<(rusqlite::Statement, Vec<Box<dyn rusqlite::ToSql>>)> {
+        let (where_clause, params) = self.query.to_sql_clause();
+        Ok((
+            self.conn
+                .prepare(&format!("{} WHERE {}", prefix, where_clause))?,
+            params,
+        ))
+    }
+
     pub fn len(&self) -> Result<usize> {
-        Ok(self
-            .conn
-            .prepare("SELECT COUNT(*) FROM objects")?
+        let (mut statement, params) = self.prepare_with_query("SELECT COUNT(*) FROM objects")?;
+        Ok(statement
             // This workaround can be removed when https://github.com/rusqlite/rusqlite/issues/700
             // is closed
-            .query_row(params![], |row| row.get::<usize, i64>(0))? as usize)
+            .query_row(params, |row| row.get::<usize, i64>(0))? as usize)
     }
 
     pub fn iter(&self) -> Result<impl Iterator<Item = Object> + 'a> {
-        Ok(self
-            .conn
-            .prepare("SELECT object_id, properties FROM objects")?
-            .query_and_then(params![], |row| {
-                Ok((row.get::<usize, i64>(0)?, row.get::<usize, String>(1)?))
-            })?
+        let (mut statement, params) =
+            self.prepare_with_query("SELECT object_id, properties FROM objects")?;
+
+        let rows = statement.query_and_then(params, |row| {
+            Ok((row.get::<usize, i64>(0)?, row.get::<usize, String>(1)?))
+        })?;
+
+        let result = Ok(rows
             .map(|r: rusqlite::Result<(i64, String)>| {
                 r.as_store_result()
                     .and_then(|(object_id, serialized_object)| {
@@ -161,7 +181,9 @@ impl<'a> Collection<'a> {
                     })
             })
             .collect::<Result<Vec<Object>>>()?
-            .into_iter())
+            .into_iter());
+
+        result
     }
 }
 
@@ -204,26 +226,25 @@ mod tests {
     }
 
     #[test]
-    fn new_store_is_empty() {
-        assert_eq!(
-            open_store(&test_dir(), "store.qualia").all().len().unwrap(),
-            0
-        );
+    fn new_store_is_empty() -> Result<()> {
+        assert_eq!(open_store(&test_dir(), "store.qualia").all().len()?, 0);
+
+        Ok(())
     }
 
     #[test]
-    fn added_objects_can_be_found() {
+    fn added_objects_exist() -> Result<()> {
         let test_dir = test_dir();
         let mut store = open_store(&test_dir, "store.qualia");
 
-        store.add(mkobject!("name": "b", "c": "d")).unwrap();
-        store.add(mkobject!("name": "d", "c": "f")).unwrap();
-        store.add(mkobject!("name": "c", "c": "e")).unwrap();
+        store.add(mkobject!("name": "b", "c": "d"))?;
+        store.add(mkobject!("name": "d", "c": "f"))?;
+        store.add(mkobject!("name": "c", "c": "e"))?;
 
         let all = store.all();
 
-        assert_eq!(all.len().unwrap(), 3);
-        let mut all_objects = all.iter().unwrap().collect::<Vec<Object>>();
+        assert_eq!(all.len()?, 3);
+        let mut all_objects = all.iter()?.collect::<Vec<Object>>();
         sort_objects(&mut all_objects);
         assert_eq!(
             all_objects,
@@ -233,5 +254,31 @@ mod tests {
                 mkobject!("name": "d", "c": "f", "object-id": 2)
             ],
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn added_objects_can_be_found() -> Result<()> {
+        let test_dir = test_dir();
+        let mut store = open_store(&test_dir, "store.qualia");
+
+        store.add(mkobject!("name": "b", "c": "d"))?;
+        store.add(mkobject!("name": "d", "c": "f"))?;
+
+        let found = store.query(Box::new(query::PropEqual {
+            name: "name".to_string(),
+            value: "d".to_string(),
+        }));
+
+        assert_eq!(found.len()?, 1);
+        let mut found_objects = found.iter()?.collect::<Vec<Object>>();
+        sort_objects(&mut found_objects);
+        assert_eq!(
+            found_objects,
+            vec![mkobject!("name": "d", "c": "f", "object-id": 2)],
+        );
+
+        Ok(())
     }
 }
