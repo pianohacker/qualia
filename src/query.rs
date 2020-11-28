@@ -1,9 +1,20 @@
 use rusqlite::ToSql;
 
+use crate::object::PropValue;
+
 macro_rules! vec_params {
     ($($param:expr),* $(,)?) => {
         vec![$(Box::new($param) as Box<dyn ToSql>),*]
     };
+}
+
+impl ToSql for PropValue {
+    fn to_sql(&self) -> std::result::Result<rusqlite::types::ToSqlOutput<'_>, rusqlite::Error> {
+        match self {
+            PropValue::Number(n) => n.to_sql(),
+            PropValue::String(s) => s.to_sql(),
+        }
+    }
 }
 
 pub trait QueryNode {
@@ -22,13 +33,26 @@ impl QueryNode for Empty {
 #[derive(Debug)]
 pub struct PropEqual {
     pub name: String,
-    pub value: String,
+    pub value: PropValue,
 }
 
 impl QueryNode for PropEqual {
     fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
+        if self.name == "object_id" {
+            return ("object_id = ?".to_string(), vec_params![self.value.clone()]);
+        }
+
+        let cast_type = match self.value {
+            PropValue::String(_) => "TEXT",
+            PropValue::Number(_) => "NUMBER",
+        };
+
         (
-            format!("json_extract(properties, \"$.{}\") = ?", self.name).to_string(),
+            format!(
+                "CAST(json_extract(properties, \"$.{}\") AS {}) = ?",
+                self.name, cast_type
+            )
+            .to_string(),
             vec_params![self.value.clone()],
         )
     }
@@ -51,10 +75,26 @@ mod tests {
             query_test!(
                 PropEqual {
                     name: "name".to_string(),
-                    value: "value".to_string(),
+                    value: PropValue::String("value".to_string()),
                 },
-                "json_extract(properties, \"$.name\") = ?",
+                "CAST(json_extract(properties, \"$.name\") AS TEXT) = ?",
                 ["value"],
+            ),
+            query_test!(
+                PropEqual {
+                    name: "name".to_string(),
+                    value: PropValue::Number(42),
+                },
+                "CAST(json_extract(properties, \"$.name\") AS NUMBER) = ?",
+                [42],
+            ),
+            query_test!(
+                PropEqual {
+                    name: "object_id".to_string(),
+                    value: PropValue::Number(42),
+                },
+                "object_id = ?",
+                [42],
             ),
         ];
 

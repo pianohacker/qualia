@@ -261,7 +261,7 @@ mod tests {
 
         let found = store.query(Box::new(query::PropEqual {
             name: "name".to_string(),
-            value: "d".to_string(),
+            value: PropValue::String("d".to_string()),
         }));
 
         assert_eq!(found.len()?, 1);
@@ -284,7 +284,7 @@ mod tests {
 
         let found = store.query(Box::new(query::PropEqual {
             name: "name".to_string(),
-            value: "b".to_string(),
+            value: PropValue::String("b".to_string()),
         }));
 
         assert_eq!(found.len()?, 1);
