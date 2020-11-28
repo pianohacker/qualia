@@ -96,7 +96,7 @@ impl Store {
         for (version, update) in updates.iter().enumerate().skip(version) {
             self.conn.execute_batch(update)?;
             self.conn
-                .pragma_update(None, "user_version", &(version as i64))?;
+                .pragma_update(None, "user_version", &((version + 1) as i64))?;
         }
 
         Ok(())
