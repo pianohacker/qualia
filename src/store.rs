@@ -116,14 +116,14 @@ impl Store {
         }
     }
 
-    pub fn add(&mut self, object: Object) -> Result<f64> {
+    pub fn add(&mut self, object: Object) -> Result<i64> {
         let object_serialized = serde_json::to_string(&object)?;
 
         self.conn
             .prepare("INSERT INTO objects(properties) VALUES(?)")?
             .execute(params![object_serialized])?;
 
-        Ok(self.conn.last_insert_rowid() as f64)
+        Ok(self.conn.last_insert_rowid() as i64)
     }
 }
 
@@ -168,7 +168,7 @@ impl<'a> Collection<'a> {
                         let mut object =
                             serde_json::from_str::<Object>(&serialized_object).as_store_result()?;
 
-                        object.insert("object-id".to_string(), PropValue::Number(object_id as f64));
+                        object.insert("object-id".to_string(), PropValue::Number(object_id));
                         Ok(object)
                     })
             })

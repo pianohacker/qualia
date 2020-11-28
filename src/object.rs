@@ -4,7 +4,7 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PropValue {
-    Number(f64),
+    Number(i64),
     String(String),
 }
 
@@ -17,13 +17,20 @@ impl PropValue {
             _ => None,
         }
     }
+
+    pub fn as_number(&self) -> Option<i64> {
+        match self {
+            PropValue::Number(n) => Some(*n),
+            _ => None,
+        }
+    }
 }
 
 impl From<serde_json::Value> for PropValue {
     fn from(x: serde_json::Value) -> Self {
         match x {
             serde_json::Value::String(s) => PropValue::String(s),
-            serde_json::Value::Number(n) => PropValue::Number(n.as_f64().unwrap()),
+            serde_json::Value::Number(n) => PropValue::Number(n.as_i64().unwrap()),
             _ => {
                 panic!("attempt to create PropValue from serde_json::Value not a Number or String")
             }
