@@ -116,14 +116,14 @@ impl Store {
         }
     }
 
-    pub fn add(&mut self, object: Object) -> Result<()> {
+    pub fn add(&mut self, object: Object) -> Result<f64> {
         let object_serialized = serde_json::to_string(&object)?;
 
         self.conn
             .prepare("INSERT INTO objects(properties) VALUES(?)")?
             .execute(params![object_serialized])?;
 
-        Ok(())
+        Ok(self.conn.last_insert_rowid() as f64)
     }
 }
 
@@ -270,6 +270,29 @@ mod tests {
         assert_eq!(
             found_objects,
             vec![mkobject!("name": "d", "c": "f", "object-id": 2)],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn adding_objects_returns_their_id() -> Result<()> {
+        let test_dir = test_dir();
+        let mut store = open_store(&test_dir, "store.qualia");
+
+        let object_id = store.add(mkobject!("name": "b", "c": "d"))?;
+
+        let found = store.query(Box::new(query::PropEqual {
+            name: "name".to_string(),
+            value: "b".to_string(),
+        }));
+
+        assert_eq!(found.len()?, 1);
+        let mut found_objects = found.iter()?.collect::<Vec<Object>>();
+        sort_objects(&mut found_objects);
+        assert_eq!(
+            found_objects,
+            vec![mkobject!("name": "b", "c": "d", "object-id": object_id)],
         );
 
         Ok(())
