@@ -1,8 +1,10 @@
 //! A document store with a flexible query language and built-in undo support.
 
+use regex::Regex;
 use rusqlite::{params, Connection};
 use std::path::Path;
 use std::result::Result as Result_;
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::object::*;
@@ -56,6 +58,8 @@ impl Store {
 
         store.upgrade_if_needed()?;
 
+        store.add_regexp_function()?;
+
         Ok(store)
     }
 
@@ -100,6 +104,35 @@ impl Store {
         }
 
         Ok(())
+    }
+
+    fn add_regexp_function(&mut self) -> Result<()> {
+        // Lifted from https://docs.rs/rusqlite/0.24.1/rusqlite/functions/index.html
+        Ok(self.conn.create_scalar_function(
+            "regexp",
+            2,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            move |ctx| {
+                assert_eq!(ctx.len(), 2, "called with unexpected number of arguments");
+                let regexp: Arc<Regex> = ctx.get_or_create_aux(
+                    0,
+                    |vr| -> Result<_, Box<dyn std::error::Error + Send + Sync + 'static>> {
+                        Ok(Regex::new(vr.as_str()?)?)
+                    },
+                )?;
+                let is_match = {
+                    let text = ctx
+                        .get_raw(1)
+                        .as_str()
+                        .map_err(|e| rusqlite::Error::UserFunctionError(e.into()))?;
+
+                    regexp.is_match(text)
+                };
+
+                Ok(is_match)
+            },
+        )?)
     }
 
     pub fn all(&self) -> Collection {
@@ -208,6 +241,17 @@ mod tests {
         };
     }
 
+    fn populated_store() -> Result<(Store, TempDir)> {
+        let test_dir = test_dir();
+        let mut store = open_store(&test_dir, "store.qualia");
+
+        store.add(mkobject!("name": "one", "blah": "blah"))?;
+        store.add(mkobject!("name": "two", "blah": "halb"))?;
+        store.add(mkobject!("name": "three", "blah": "BLAH"))?;
+
+        Ok((store, test_dir))
+    }
+
     fn sort_objects(objects: &mut Vec<Object>) {
         objects.sort_by_key(|o| {
             o.get("name")
@@ -227,12 +271,7 @@ mod tests {
 
     #[test]
     fn added_objects_exist() -> Result<()> {
-        let test_dir = test_dir();
-        let mut store = open_store(&test_dir, "store.qualia");
-
-        store.add(mkobject!("name": "b", "c": "d"))?;
-        store.add(mkobject!("name": "d", "c": "f"))?;
-        store.add(mkobject!("name": "c", "c": "e"))?;
+        let (store, _test_dir) = populated_store()?;
 
         let all = store.all();
 
@@ -242,9 +281,9 @@ mod tests {
         assert_eq!(
             all_objects,
             vec![
-                mkobject!("name": "b", "c": "d", "object-id": 1),
-                mkobject!("name": "c", "c": "e", "object-id": 3),
-                mkobject!("name": "d", "c": "f", "object-id": 2)
+                mkobject!("name": "one", "blah": "blah", "object-id": 1),
+                mkobject!("name": "three", "blah": "BLAH", "object-id": 3),
+                mkobject!("name": "two", "blah": "halb", "object-id": 2),
             ],
         );
 
@@ -253,15 +292,11 @@ mod tests {
 
     #[test]
     fn added_objects_can_be_found() -> Result<()> {
-        let test_dir = test_dir();
-        let mut store = open_store(&test_dir, "store.qualia");
-
-        store.add(mkobject!("name": "b", "c": "d"))?;
-        store.add(mkobject!("name": "d", "c": "f"))?;
+        let (store, _test_dir) = populated_store()?;
 
         let found = store.query(Box::new(query::PropEqual {
             name: "name".to_string(),
-            value: PropValue::String("d".to_string()),
+            value: PropValue::String("one".to_string()),
         }));
 
         assert_eq!(found.len()?, 1);
@@ -269,30 +304,7 @@ mod tests {
         sort_objects(&mut found_objects);
         assert_eq!(
             found_objects,
-            vec![mkobject!("name": "d", "c": "f", "object-id": 2)],
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn adding_objects_returns_their_id() -> Result<()> {
-        let test_dir = test_dir();
-        let mut store = open_store(&test_dir, "store.qualia");
-
-        let object_id = store.add(mkobject!("name": "b", "c": "d"))?;
-
-        let found = store.query(Box::new(query::PropEqual {
-            name: "name".to_string(),
-            value: PropValue::String("b".to_string()),
-        }));
-
-        assert_eq!(found.len()?, 1);
-        let mut found_objects = found.iter()?.collect::<Vec<Object>>();
-        sort_objects(&mut found_objects);
-        assert_eq!(
-            found_objects,
-            vec![mkobject!("name": "b", "c": "d", "object-id": object_id)],
+            vec![mkobject!("name": "one", "blah": "blah", "object-id": 1)],
         );
 
         Ok(())
@@ -300,8 +312,7 @@ mod tests {
 
     #[test]
     fn objects_can_be_found_by_their_object_id() -> Result<()> {
-        let test_dir = test_dir();
-        let mut store = open_store(&test_dir, "store.qualia");
+        let (mut store, _test_dir) = populated_store()?;
 
         let object_id = store.add(mkobject!("name": "b", "c": "d"))?;
 
@@ -316,6 +327,29 @@ mod tests {
         assert_eq!(
             found_objects,
             vec![mkobject!("name": "b", "c": "d", "object-id": object_id)],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn objects_can_be_found_by_like() -> Result<()> {
+        let (store, _test_dir) = populated_store()?;
+
+        let found = store.query(Box::new(query::PropLike {
+            name: "blah".into(),
+            value: "blah".into(),
+        }));
+
+        assert_eq!(found.len()?, 2);
+        let mut found_objects = found.iter()?.collect::<Vec<Object>>();
+        sort_objects(&mut found_objects);
+        assert_eq!(
+            found_objects,
+            vec![
+                mkobject!("name": "one", "blah": "blah", "object-id": 1),
+                mkobject!("name": "three", "blah": "BLAH", "object-id": 3)
+            ],
         );
 
         Ok(())

@@ -58,6 +58,25 @@ impl QueryNode for PropEqual {
     }
 }
 
+#[derive(Debug)]
+pub struct PropLike {
+    pub name: String,
+    pub value: String,
+}
+
+impl QueryNode for PropLike {
+    fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
+        (
+            format!(
+                "CAST(json_extract(properties, \"$.{}\") AS TEXT) REGEXP ?",
+                self.name
+            )
+            .to_string(),
+            vec_params![format!(r"(?i)\b{}\b", self.value).to_string()],
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,7 +94,7 @@ mod tests {
             query_test!(
                 PropEqual {
                     name: "name".to_string(),
-                    value: PropValue::String("value".to_string()),
+                    value: "value".into(),
                 },
                 "CAST(json_extract(properties, \"$.name\") AS TEXT) = ?",
                 ["value"],
@@ -83,7 +102,7 @@ mod tests {
             query_test!(
                 PropEqual {
                     name: "name".to_string(),
-                    value: PropValue::Number(42),
+                    value: 42.into(),
                 },
                 "CAST(json_extract(properties, \"$.name\") AS NUMBER) = ?",
                 [42],
@@ -91,10 +110,18 @@ mod tests {
             query_test!(
                 PropEqual {
                     name: "object-id".to_string(),
-                    value: PropValue::Number(42),
+                    value: 42.into(),
                 },
                 "object_id = ?",
                 [42],
+            ),
+            query_test!(
+                PropLike {
+                    name: "name".to_string(),
+                    value: "phrase".to_string(),
+                },
+                "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
+                [r"(?i)\bphrase\b"],
             ),
         ];
 
