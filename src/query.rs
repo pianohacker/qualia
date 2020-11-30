@@ -17,7 +17,7 @@ impl ToSql for PropValue {
     }
 }
 
-pub trait QueryNode {
+pub trait QueryNode: std::fmt::Debug {
     fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>);
 }
 
@@ -77,13 +77,28 @@ impl QueryNode for PropLike {
     }
 }
 
+impl QueryNode for And {
+    fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
+        let (clauses, param_vecs): (Vec<_>, Vec<_>) =
+            self.0.iter().map(|node| node.to_sql_clause()).unzip();
+
+        (
+            clauses.join(" AND "),
+            param_vecs.into_iter().flatten().collect(),
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct And(pub Vec<Box<dyn QueryNode>>);
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     macro_rules! query_test {
-        ( $query:expr, $where_clause:expr, [$($params:expr),*] $(,)?) => {
-            (Box::new($query) as Box<dyn QueryNode>, $where_clause.to_string(), vec_params![$($params,),*])
+        ( $query:expr, $where_clause:expr, [$($params:expr),* $(,)?] $(,)?) => {
+            (Box::new($query) as Box<dyn QueryNode>, $where_clause.to_string(), vec_params![$($params),*])
         }
     }
 
@@ -122,6 +137,24 @@ mod tests {
                 },
                 "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
                 [r"(?i)\bphrase\b"],
+            ),
+            query_test!(
+                And(vec![
+                    Box::new(PropEqual {
+                        name: "name1".to_string(),
+                        value: "value1".into(),
+                    }),
+                    Box::new(PropEqual {
+                        name: "name2".to_string(),
+                        value: "value2".into(),
+                    }),
+                    Box::new(PropEqual {
+                        name: "name3".to_string(),
+                        value: "value3".into(),
+                    }),
+                ]),
+                "CAST(json_extract(properties, \"$.name1\") AS TEXT) = ? AND CAST(json_extract(properties, \"$.name2\") AS TEXT) = ? AND CAST(json_extract(properties, \"$.name3\") AS TEXT) = ?",
+                ["value1", "value2", "value3"],
             ),
         ];
 

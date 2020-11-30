@@ -354,4 +354,30 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn objects_can_be_found_by_and() -> Result<()> {
+        let (store, _test_dir) = populated_store()?;
+
+        let found = store.query(Box::new(query::And(vec![
+            Box::new(query::PropEqual {
+                name: "name".into(),
+                value: "one".into(),
+            }),
+            Box::new(query::PropLike {
+                name: "blah".into(),
+                value: "blah".into(),
+            }),
+        ])));
+
+        assert_eq!(found.len()?, 1);
+        let mut found_objects = found.iter()?.collect::<Vec<Object>>();
+        sort_objects(&mut found_objects);
+        assert_eq!(
+            found_objects,
+            vec![mkobject!("name": "one", "blah": "blah", "object-id": 1),],
+        );
+
+        Ok(())
+    }
 }
