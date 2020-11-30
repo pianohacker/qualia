@@ -297,4 +297,27 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn objects_can_be_found_by_their_object_id() -> Result<()> {
+        let test_dir = test_dir();
+        let mut store = open_store(&test_dir, "store.qualia");
+
+        let object_id = store.add(mkobject!("name": "b", "c": "d"))?;
+
+        let found = store.query(Box::new(query::PropEqual {
+            name: "object-id".into(),
+            value: object_id.into(),
+        }));
+
+        assert_eq!(found.len()?, 1);
+        let mut found_objects = found.iter()?.collect::<Vec<Object>>();
+        sort_objects(&mut found_objects);
+        assert_eq!(
+            found_objects,
+            vec![mkobject!("name": "b", "c": "d", "object-id": object_id)],
+        );
+
+        Ok(())
+    }
 }

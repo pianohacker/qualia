@@ -38,7 +38,7 @@ pub struct PropEqual {
 
 impl QueryNode for PropEqual {
     fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
-        if self.name == "object_id" {
+        if self.name == "object-id" {
             return ("object_id = ?".to_string(), vec_params![self.value.clone()]);
         }
 
@@ -90,7 +90,7 @@ mod tests {
             ),
             query_test!(
                 PropEqual {
-                    name: "object_id".to_string(),
+                    name: "object-id".to_string(),
                     value: PropValue::Number(42),
                 },
                 "object_id = ?",

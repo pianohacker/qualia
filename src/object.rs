@@ -43,3 +43,27 @@ impl From<&serde_json::Value> for PropValue {
         PropValue::from(x.clone())
     }
 }
+
+impl<'a> From<&'a str> for PropValue {
+    fn from(s: &str) -> Self {
+        PropValue::String(s.to_string())
+    }
+}
+
+impl From<String> for PropValue {
+    fn from(s: String) -> Self {
+        PropValue::String(s.clone())
+    }
+}
+
+impl From<&String> for PropValue {
+    fn from(s: &String) -> Self {
+        PropValue::String(s.clone())
+    }
+}
+
+impl From<i64> for PropValue {
+    fn from(s: i64) -> Self {
+        PropValue::Number(s.clone())
+    }
+}
