@@ -1,15 +1,19 @@
 [package]
 name = "qualia"
-version = "0.5.0"
+version = "0.3.0"
 authors = ["Jesse Weaver <pianohacker@gmail.com>"]
 edition = "2018"
+description = "Basic semi-schemaless document store"
+license = "MPL-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 rusqlite = { version = "0.24", features = ["functions"] } # Ergonomic wrapper for SQLite
 thiserror = "1.0" # derive(Error)
-tempdir = "0.3" # A library for managing a temporary directory and deleting all contents when it's dropped.
 serde = { version = "1.0", features = ["derive"] } # A generic serialization/deserialization framework
 serde_json = "1.0" # A JSON serialization file format
 regex = "1.4.2" # An implementation of regular expressions for Rust. This implementation uses finite automata and gua…
+
+[dev-dependencies]
+tempdir = "0.3" # A library for managing a temporary directory and deleting all contents when it's dropped.
