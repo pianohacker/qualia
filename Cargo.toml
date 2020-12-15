@@ -1,8 +1,10 @@
 [package]
 name = "qualia"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Jesse Weaver <pianohacker@gmail.com>"]
 edition = "2018"
+description = "Basic semi-schemaless document store"
+license = "MPL-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

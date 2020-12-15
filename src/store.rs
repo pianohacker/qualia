@@ -248,6 +248,7 @@ mod tests {
         store.add(mkobject!("name": "one", "blah": "blah"))?;
         store.add(mkobject!("name": "two", "blah": "halb"))?;
         store.add(mkobject!("name": "three", "blah": "BLAH"))?;
+        store.add(mkobject!("name": "four", "blah": "blahblah"))?;
 
         Ok((store, test_dir))
     }
@@ -275,12 +276,13 @@ mod tests {
 
         let all = store.all();
 
-        assert_eq!(all.len()?, 3);
+        assert_eq!(all.len()?, 4);
         let mut all_objects = all.iter()?.collect::<Vec<Object>>();
         sort_objects(&mut all_objects);
         assert_eq!(
             all_objects,
             vec![
+                mkobject!("name": "four", "blah": "blahblah", "object-id": 4),
                 mkobject!("name": "one", "blah": "blah", "object-id": 1),
                 mkobject!("name": "three", "blah": "BLAH", "object-id": 3),
                 mkobject!("name": "two", "blah": "halb", "object-id": 2),

@@ -66,13 +66,23 @@ pub struct PropLike {
 
 impl QueryNode for PropLike {
     fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
+        let words = self.value.split(" ").filter(|word| word != &"");
+        let wrapped_words: Vec<String> = words
+            .map(|word| {
+                let pieces = word.split("*");
+                let quoted_pieces: Vec<String> = pieces.map(regex::escape).collect();
+                format!(r"\b{}\b", quoted_pieces.join(r"\w*"))
+            })
+            .collect();
+        let wrapped_words_phrase = wrapped_words.join(r".*?");
+
         (
             format!(
                 "CAST(json_extract(properties, \"$.{}\") AS TEXT) REGEXP ?",
                 self.name
             )
             .to_string(),
-            vec_params![format!(r"(?i)\b{}\b", self.value).to_string()],
+            vec_params![format!(r"(?i){}", wrapped_words_phrase).to_string()],
         )
     }
 }
@@ -95,18 +105,36 @@ pub struct And(pub Vec<Box<dyn QueryNode>>);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::types::{ToSqlOutput, ValueRef};
 
     macro_rules! query_test {
-        ( $query:expr, $where_clause:expr, [$($params:expr),* $(,)?] $(,)?) => {
-            (Box::new($query) as Box<dyn QueryNode>, $where_clause.to_string(), vec_params![$($params),*])
+        ( $description:expr, $query:expr, $where_clause:expr, [$($params:expr),* $(,)?] $(,)?) => {
+            ($description, Box::new($query) as Box<dyn QueryNode>, $where_clause.to_string(), vec_params![$($params),*])
         }
+    }
+
+    fn stringify_params(params: &Vec<Box<dyn rusqlite::ToSql>>) -> Vec<String> {
+        params
+            .iter()
+            .map(|param| {
+                let output = param.to_sql().unwrap();
+
+                match output {
+                    ToSqlOutput::Borrowed(ValueRef::Text(s)) => {
+                        std::str::from_utf8(s).unwrap().to_string()
+                    }
+                    _ => format!("{:#?}", output),
+                }
+            })
+            .collect()
     }
 
     #[test]
     fn queries_convert_correctly() {
         let tests = [
-            query_test!(Empty {}, "1=1".to_string(), []),
+            query_test!("empty query", Empty {}, "1=1".to_string(), []),
             query_test!(
+                "string equal",
                 PropEqual {
                     name: "name".to_string(),
                     value: "value".into(),
@@ -115,6 +143,7 @@ mod tests {
                 ["value"],
             ),
             query_test!(
+                "number equal",
                 PropEqual {
                     name: "name".to_string(),
                     value: 42.into(),
@@ -123,6 +152,7 @@ mod tests {
                 [42],
             ),
             query_test!(
+                "object-id equal",
                 PropEqual {
                     name: "object-id".to_string(),
                     value: 42.into(),
@@ -131,6 +161,7 @@ mod tests {
                 [42],
             ),
             query_test!(
+                "simple word like",
                 PropLike {
                     name: "name".to_string(),
                     value: "phrase".to_string(),
@@ -139,6 +170,43 @@ mod tests {
                 [r"(?i)\bphrase\b"],
             ),
             query_test!(
+                "prefix word like",
+                PropLike {
+                    name: "name".to_string(),
+                    value: "phr*".to_string(),
+                },
+                "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
+                [r"(?i)\bphr\w*\b"],
+            ),
+            query_test!(
+                "suffix word like",
+                PropLike {
+                    name: "name".to_string(),
+                    value: "*ase".to_string(),
+                },
+                "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
+                [r"(?i)\b\w*ase\b"],
+            ),
+            query_test!(
+                "mid-word like",
+                PropLike {
+                    name: "name".to_string(),
+                    value: "*ras*".to_string(),
+                },
+                "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
+                [r"(?i)\b\w*ras\w*\b"],
+            ),
+            query_test!(
+                "multi-word like",
+                PropLike {
+                    name: "name".to_string(),
+                    value: "lon* *hrase".to_string(),
+                },
+                "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
+                [r"(?i)\blon\w*\b.*?\b\w*hrase\b"],
+            ),
+            query_test!(
+                "anded queries",
                 And(vec![
                     Box::new(PropEqual {
                         name: "name1".to_string(),
@@ -158,18 +226,20 @@ mod tests {
             ),
         ];
 
-        for (query, expected_where_clause, expected_params) in &tests {
+        for (description, query, expected_where_clause, expected_params) in &tests {
             let (actual_where_clause, actual_params) = &query.to_sql_clause();
 
-            let expected_params_output: Vec<rusqlite::types::ToSqlOutput> = expected_params
-                .iter()
-                .map(|x| x.to_sql().unwrap())
-                .collect();
-            let actual_params_output: Vec<rusqlite::types::ToSqlOutput> =
-                actual_params.iter().map(|x| x.to_sql().unwrap()).collect();
-
-            assert_eq!(expected_where_clause, actual_where_clause);
-            assert_eq!(expected_params_output, actual_params_output);
+            assert_eq!(
+                expected_where_clause, actual_where_clause,
+                "{} where clause",
+                description
+            );
+            assert_eq!(
+                stringify_params(&expected_params),
+                stringify_params(&actual_params),
+                "{} params",
+                description
+            );
         }
     }
 }
