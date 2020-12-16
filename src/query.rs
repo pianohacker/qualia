@@ -2,6 +2,14 @@ use rusqlite::ToSql;
 
 use crate::object::PropValue;
 
+#[derive(Debug, PartialEq)]
+pub enum QueryNode {
+    Empty,
+    PropEqual { name: String, value: PropValue },
+    PropLike { name: String, value: String },
+    And(Vec<QueryNode>),
+}
+
 macro_rules! vec_params {
     ($($param:expr),* $(,)?) => {
         vec![$(Box::new($param) as Box<dyn ToSql>),*]
@@ -17,32 +25,22 @@ impl ToSql for PropValue {
     }
 }
 
-pub trait QueryNode: std::fmt::Debug {
-    fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>);
-}
-
-#[derive(Debug)]
-pub struct Empty {}
-
-impl QueryNode for Empty {
-    fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
-        ("1=1".to_string(), vec_params![])
+impl QueryNode {
+    pub fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
+        match self {
+            QueryNode::Empty => ("1=1".to_string(), vec_params![]),
+            QueryNode::PropEqual { name, value } => Self::equal_to_sql_clause(name, value),
+            QueryNode::PropLike { name, value } => Self::like_to_sql_clause(name, value),
+            QueryNode::And(nodes) => Self::and_to_sql_clause(nodes),
+        }
     }
-}
 
-#[derive(Debug)]
-pub struct PropEqual {
-    pub name: String,
-    pub value: PropValue,
-}
-
-impl QueryNode for PropEqual {
-    fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
-        if self.name == "object-id" {
-            return ("object_id = ?".to_string(), vec_params![self.value.clone()]);
+    fn equal_to_sql_clause(name: &String, value: &PropValue) -> (String, Vec<Box<dyn ToSql>>) {
+        if name == "object-id" {
+            return ("object_id = ?".to_string(), vec_params![value.clone()]);
         }
 
-        let cast_type = match self.value {
+        let cast_type = match value {
             PropValue::String(_) => "TEXT",
             PropValue::Number(_) => "NUMBER",
         };
@@ -50,23 +48,15 @@ impl QueryNode for PropEqual {
         (
             format!(
                 "CAST(json_extract(properties, \"$.{}\") AS {}) = ?",
-                self.name, cast_type
+                name, cast_type
             )
             .to_string(),
-            vec_params![self.value.clone()],
+            vec_params![value.clone()],
         )
     }
-}
 
-#[derive(Debug)]
-pub struct PropLike {
-    pub name: String,
-    pub value: String,
-}
-
-impl QueryNode for PropLike {
-    fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
-        let words = self.value.split(" ").filter(|word| word != &"");
+    fn like_to_sql_clause(name: &String, value: &String) -> (String, Vec<Box<dyn ToSql>>) {
+        let words = value.split(" ").filter(|word| word != &"");
         let wrapped_words: Vec<String> = words
             .map(|word| {
                 let pieces = word.split("*");
@@ -79,18 +69,16 @@ impl QueryNode for PropLike {
         (
             format!(
                 "CAST(json_extract(properties, \"$.{}\") AS TEXT) REGEXP ?",
-                self.name
+                name
             )
             .to_string(),
             vec_params![format!(r"(?i){}", wrapped_words_phrase).to_string()],
         )
     }
-}
 
-impl QueryNode for And {
-    fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
+    fn and_to_sql_clause(nodes: &Vec<QueryNode>) -> (String, Vec<Box<dyn ToSql>>) {
         let (clauses, param_vecs): (Vec<_>, Vec<_>) =
-            self.0.iter().map(|node| node.to_sql_clause()).unzip();
+            nodes.iter().map(|node| node.to_sql_clause()).unzip();
 
         (
             clauses.join(" AND "),
@@ -99,17 +87,15 @@ impl QueryNode for And {
     }
 }
 
-#[derive(Debug)]
-pub struct And(pub Vec<Box<dyn QueryNode>>);
-
 #[cfg(test)]
 mod tests {
+    use super::QueryNode::*;
     use super::*;
     use rusqlite::types::{ToSqlOutput, ValueRef};
 
     macro_rules! query_test {
         ( $description:expr, $query:expr, $where_clause:expr, [$($params:expr),* $(,)?] $(,)?) => {
-            ($description, Box::new($query) as Box<dyn QueryNode>, $where_clause.to_string(), vec_params![$($params),*])
+            ($description, $query, $where_clause.to_string(), vec_params![$($params),*])
         }
     }
 
@@ -208,18 +194,18 @@ mod tests {
             query_test!(
                 "anded queries",
                 And(vec![
-                    Box::new(PropEqual {
+                    PropEqual {
                         name: "name1".to_string(),
                         value: "value1".into(),
-                    }),
-                    Box::new(PropEqual {
+                    },
+                    PropEqual {
                         name: "name2".to_string(),
                         value: "value2".into(),
-                    }),
-                    Box::new(PropEqual {
+                    },
+                    PropEqual {
                         name: "name3".to_string(),
                         value: "value3".into(),
-                    }),
+                    },
                 ]),
                 "CAST(json_extract(properties, \"$.name1\") AS TEXT) = ? AND CAST(json_extract(properties, \"$.name2\") AS TEXT) = ? AND CAST(json_extract(properties, \"$.name3\") AS TEXT) = ?",
                 ["value1", "value2", "value3"],

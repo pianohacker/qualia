@@ -1,3 +1,4 @@
+#![macro_use]
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -9,6 +10,18 @@ pub enum PropValue {
 }
 
 pub type Object = HashMap<String, PropValue>;
+
+#[macro_export]
+macro_rules! object {
+    ( $($key:expr => $value:expr $(,)?)* ) => {{
+        let mut object = Object::new();
+        $(object.insert($key.into(), $value.into());)*
+        object
+    }};
+    () => {
+        Object::new()
+    };
+}
 
 impl PropValue {
     pub fn as_str(&self) -> Option<&String> {

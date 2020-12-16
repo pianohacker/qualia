@@ -8,7 +8,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::object::*;
-use crate::query;
+use crate::query::QueryNode;
 
 pub type Result<T, E = StoreError> = Result_<T, E>;
 
@@ -138,14 +138,14 @@ impl Store {
     pub fn all(&self) -> Collection {
         Collection {
             conn: &self.conn,
-            query: Box::new(query::Empty {}),
+            query: QueryNode::Empty,
         }
     }
 
-    pub fn query(&self, query: Box<dyn query::QueryNode>) -> Collection {
+    pub fn query(&self, query: impl Into<QueryNode>) -> Collection {
         Collection {
             conn: &self.conn,
-            query,
+            query: query.into(),
         }
     }
 
@@ -162,7 +162,7 @@ impl Store {
 
 pub struct Collection<'a> {
     conn: &'a Connection,
-    query: Box<dyn query::QueryNode>,
+    query: QueryNode,
 }
 
 impl<'a> Collection<'a> {
@@ -215,7 +215,7 @@ impl<'a> Collection<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::Q;
     use tempdir::TempDir;
 
     fn open_store(tempdir: &TempDir, name: &str) -> Store {
@@ -226,29 +226,14 @@ mod tests {
         TempDir::new("qualia-store").unwrap()
     }
 
-    fn mkobject_(proplist: serde_json::Value) -> Object {
-        let proplist_map = proplist.as_object().unwrap();
-
-        proplist_map
-            .iter()
-            .map(|(k, v)| (k.clone(), PropValue::from(v)))
-            .collect()
-    }
-
-    macro_rules! mkobject {
-        ( $($x:tt)* ) => {
-            mkobject_(json!({ $($x)* }))
-        };
-    }
-
     fn populated_store() -> Result<(Store, TempDir)> {
         let test_dir = test_dir();
         let mut store = open_store(&test_dir, "store.qualia");
 
-        store.add(mkobject!("name": "one", "blah": "blah"))?;
-        store.add(mkobject!("name": "two", "blah": "halb"))?;
-        store.add(mkobject!("name": "three", "blah": "BLAH"))?;
-        store.add(mkobject!("name": "four", "blah": "blahblah"))?;
+        store.add(object!("name" => "one", "blah" => "blah"))?;
+        store.add(object!("name" => "two", "blah" => "halb"))?;
+        store.add(object!("name" => "three", "blah" => "BLAH"))?;
+        store.add(object!("name" => "four", "blah" => "blahblah"))?;
 
         Ok((store, test_dir))
     }
@@ -282,10 +267,10 @@ mod tests {
         assert_eq!(
             all_objects,
             vec![
-                mkobject!("name": "four", "blah": "blahblah", "object-id": 4),
-                mkobject!("name": "one", "blah": "blah", "object-id": 1),
-                mkobject!("name": "three", "blah": "BLAH", "object-id": 3),
-                mkobject!("name": "two", "blah": "halb", "object-id": 2),
+                object!("name" => "four", "blah" => "blahblah", "object-id" => 4),
+                object!("name" => "one", "blah" => "blah", "object-id" => 1),
+                object!("name" => "three", "blah" => "BLAH", "object-id" => 3),
+                object!("name" => "two", "blah" => "halb", "object-id" => 2),
             ],
         );
 
@@ -296,17 +281,17 @@ mod tests {
     fn added_objects_can_be_found() -> Result<()> {
         let (store, _test_dir) = populated_store()?;
 
-        let found = store.query(Box::new(query::PropEqual {
+        let found = store.query(QueryNode::PropEqual {
             name: "name".to_string(),
             value: PropValue::String("one".to_string()),
-        }));
+        });
 
         assert_eq!(found.len()?, 1);
         let mut found_objects = found.iter()?.collect::<Vec<Object>>();
         sort_objects(&mut found_objects);
         assert_eq!(
             found_objects,
-            vec![mkobject!("name": "one", "blah": "blah", "object-id": 1)],
+            vec![object!("name" => "one", "blah" => "blah", "object-id" => 1)],
         );
 
         Ok(())
@@ -316,19 +301,16 @@ mod tests {
     fn objects_can_be_found_by_their_object_id() -> Result<()> {
         let (mut store, _test_dir) = populated_store()?;
 
-        let object_id = store.add(mkobject!("name": "b", "c": "d"))?;
+        let object_id = store.add(object!("name" => "b", "c" => "d"))?;
 
-        let found = store.query(Box::new(query::PropEqual {
-            name: "object-id".into(),
-            value: object_id.into(),
-        }));
+        let found = store.query(Q.id(object_id));
 
         assert_eq!(found.len()?, 1);
         let mut found_objects = found.iter()?.collect::<Vec<Object>>();
         sort_objects(&mut found_objects);
         assert_eq!(
             found_objects,
-            vec![mkobject!("name": "b", "c": "d", "object-id": object_id)],
+            vec![object!("name" => "b", "c" => "d", "object-id" => object_id)],
         );
 
         Ok(())
@@ -338,10 +320,7 @@ mod tests {
     fn objects_can_be_found_by_like() -> Result<()> {
         let (store, _test_dir) = populated_store()?;
 
-        let found = store.query(Box::new(query::PropLike {
-            name: "blah".into(),
-            value: "blah".into(),
-        }));
+        let found = store.query(Q.like("blah", "blah"));
 
         assert_eq!(found.len()?, 2);
         let mut found_objects = found.iter()?.collect::<Vec<Object>>();
@@ -349,8 +328,8 @@ mod tests {
         assert_eq!(
             found_objects,
             vec![
-                mkobject!("name": "one", "blah": "blah", "object-id": 1),
-                mkobject!("name": "three", "blah": "BLAH", "object-id": 3)
+                object!("name" => "one", "blah" => "blah", "object-id" => 1),
+                object!("name" => "three", "blah" => "BLAH", "object-id" => 3)
             ],
         );
 
@@ -361,23 +340,14 @@ mod tests {
     fn objects_can_be_found_by_and() -> Result<()> {
         let (store, _test_dir) = populated_store()?;
 
-        let found = store.query(Box::new(query::And(vec![
-            Box::new(query::PropEqual {
-                name: "name".into(),
-                value: "one".into(),
-            }),
-            Box::new(query::PropLike {
-                name: "blah".into(),
-                value: "blah".into(),
-            }),
-        ])));
+        let found = store.query(Q.equal("name", "one").equal("blah", "blah"));
 
         assert_eq!(found.len()?, 1);
         let mut found_objects = found.iter()?.collect::<Vec<Object>>();
         sort_objects(&mut found_objects);
         assert_eq!(
             found_objects,
-            vec![mkobject!("name": "one", "blah": "blah", "object-id": 1),],
+            vec![object!("name" => "one", "blah" => "blah", "object-id" => 1),],
         );
 
         Ok(())
