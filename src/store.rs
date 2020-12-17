@@ -216,14 +216,14 @@ impl<'a> Collection<'a> {
 mod tests {
     use super::*;
     use crate::Q;
-    use tempdir::TempDir;
+    use tempfile::{Builder, TempDir};
 
     fn open_store(tempdir: &TempDir, name: &str) -> Store {
         Store::open(tempdir.path().join(name)).unwrap()
     }
 
     fn test_dir() -> TempDir {
-        TempDir::new("qualia-store").unwrap()
+        Builder::new().prefix("qualia-store").tempdir().unwrap()
     }
 
     fn populated_store() -> Result<(Store, TempDir)> {

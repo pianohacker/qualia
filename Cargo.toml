@@ -16,4 +16,4 @@ serde_json = "1.0" # A JSON serialization file format
 regex = "1.4.2" # An implementation of regular expressions for Rust. This implementation uses finite automata and gua…
 
 [dev-dependencies]
-tempdir = "0.3" # A library for managing a temporary directory and deleting all contents when it's dropped.
+tempfile = "3.1" # A library for managing a temporary directory and deleting all contents when it's dropped.
