@@ -185,7 +185,7 @@ impl Store {
         Checkpoint::new(self)
     }
 
-    pub fn undo(&mut self) -> Result<()> {
+    pub fn undo(&mut self) -> Result<Option<String>> {
         let transaction = self.conn.transaction()?;
 
         let (cur_checkpoint_serial, prev_checkpoint_serial) = {
@@ -201,7 +201,7 @@ impl Store {
                 .collect::<Result<_>>()?;
 
             if last_two_checkpoint_serials.len() == 0 {
-                return Ok(());
+                return Ok(None);
             }
 
             (
@@ -209,6 +209,15 @@ impl Store {
                 *last_two_checkpoint_serials.get(1).unwrap_or(&0),
             )
         };
+
+        let description: String = transaction
+            .prepare(
+                "SELECT description
+                    FROM checkpoints
+                    WHERE serial = ?
+                ",
+            )?
+            .query_row(params![cur_checkpoint_serial], |row| row.get(0))?;
 
         let changes = transaction
             .prepare(
@@ -272,7 +281,7 @@ impl Store {
 
         transaction.commit()?;
 
-        Ok(())
+        Ok(Some(description))
     }
 }
 
@@ -288,25 +297,26 @@ impl<'a> Checkpoint<'a> {
         Ok(Checkpoint { store, transaction })
     }
 
-    fn create_checkpoint(&self) -> Result<()> {
+    fn create_checkpoint(&self, description: &str) -> Result<()> {
         self.transaction.execute(
             "INSERT
-                INTO checkpoints(serial)
+                INTO checkpoints(serial, description)
                 VALUES(
                     (SELECT
                         IFNULL(MAX(serial), 0)
                         FROM object_changes
-                    )
+                    ),
+                    ?
                 )
             ",
-            params![],
+            params![description],
         )?;
 
         Ok(())
     }
 
-    pub fn commit(self) -> Result<()> {
-        self.create_checkpoint()?;
+    pub fn commit(self, description: impl AsRef<str>) -> Result<()> {
+        self.create_checkpoint(description.as_ref())?;
         self.transaction.commit().as_store_result()
     }
 
@@ -458,7 +468,7 @@ mod tests {
         checkpoint.add(object!("name" => "two", "blah" => "halb"))?;
         checkpoint.add(object!("name" => "three", "blah" => "BLAH"))?;
         checkpoint.add(object!("name" => "four", "blah" => "blahblah"))?;
-        checkpoint.commit()?;
+        checkpoint.commit("populate store")?;
 
         Ok((store, test_dir))
     }
@@ -508,12 +518,12 @@ mod tests {
 
         let checkpoint = store.checkpoint()?;
         let object_id = checkpoint.add(object!("name" => "b", "c" => "d"))?;
-        checkpoint.commit()?;
+        checkpoint.commit("add undoable object")?;
 
         assert!(store.query(Q.id(object_id)).exists()?);
         assert_eq!(store.all().len()?, 5);
 
-        store.undo()?;
+        assert_eq!(store.undo()?, Some("add undoable object".to_string()));
 
         assert!(!store.query(Q.id(object_id)).exists()?);
         assert_eq!(store.all().len()?, 4);
@@ -547,11 +557,11 @@ mod tests {
 
         let checkpoint = store.checkpoint()?;
         let object_id = checkpoint.add(object!("name" => "b", "c" => "d"))?;
-        checkpoint.commit()?;
+        checkpoint.commit("add deleteable object")?;
 
         let checkpoint = store.checkpoint()?;
         checkpoint.query(Q.id(object_id)).delete()?;
-        checkpoint.commit()?;
+        checkpoint.commit("delete deletable object")?;
 
         assert!(!store.query(Q.id(object_id)).exists()?);
         assert_eq!(store.all().len()?, 4);
@@ -565,9 +575,9 @@ mod tests {
 
         let checkpoint = store.checkpoint()?;
         assert_eq!(checkpoint.query(Q.equal("name", "one")).delete()?, 1);
-        checkpoint.commit()?;
+        checkpoint.commit("remove object one")?;
 
-        store.undo()?;
+        assert_eq!(store.undo()?, Some("remove object one".to_string()));
 
         assert!(store.query(Q.equal("name", "one")).exists()?);
         assert_eq!(store.all().len()?, 4);
@@ -579,10 +589,10 @@ mod tests {
     fn can_undo_to_an_empty_store() -> Result<()> {
         let (mut store, _test_dir) = populated_store()?;
 
-        store.undo()?;
+        assert_eq!(store.undo()?, Some("populate store".to_string()));
         assert_eq!(store.all().len()?, 0);
 
-        store.undo()?;
+        assert_eq!(store.undo()?, None);
 
         Ok(())
     }
@@ -593,7 +603,7 @@ mod tests {
 
         let checkpoint = store.checkpoint()?;
         let object_id = checkpoint.add(object!("name" => "b", "c" => "d"))?;
-        checkpoint.commit()?;
+        checkpoint.commit("add object for its ID")?;
 
         let found = store.query(Q.id(object_id));
 
