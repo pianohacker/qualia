@@ -1,12 +1,12 @@
 [package]
 name = "qualia"
+description = "Basic semi-schemaless document store"
 version = "0.5.0"
+
+repository = "https://github.com/pianohacker/qualia"
+license = "MPL-2.0"
 authors = ["Jesse Weaver <pianohacker@gmail.com>"]
 edition = "2018"
-description = "Basic semi-schemaless document store"
-license = "MPL-2.0"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 rusqlite = { version = "0.24", features = ["functions"] } # Ergonomic wrapper for SQLite
