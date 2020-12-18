@@ -14,11 +14,14 @@ pub type Result<T, E = StoreError> = Result_<T, E>;
 
 #[derive(Error, Debug)]
 pub enum StoreError {
+    #[error("could not de/serialize object")]
+    Serialization(#[from] serde_json::Error),
+
     #[error("database error")]
     Sqlite(#[from] rusqlite::Error),
 
-    #[error("could not de/serialize object")]
-    Serialization(#[from] serde_json::Error),
+    #[error("invalid usage: {0}")]
+    Usage(String),
 }
 
 trait AsStoreResult<T> {
@@ -31,6 +34,32 @@ where
 {
     fn as_store_result(self) -> Result<T> {
         self.map_err(|e| e.into())
+    }
+}
+
+#[derive(Debug)]
+enum ChangeType {
+    Add,
+    Delete,
+}
+
+impl rusqlite::ToSql for ChangeType {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput> {
+        match self {
+            ChangeType::Add => "add",
+            ChangeType::Delete => "delete",
+        }
+        .to_sql()
+    }
+}
+
+impl rusqlite::types::FromSql for ChangeType {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        match value.as_str()? {
+            "add" => Ok(ChangeType::Add),
+            "delete" => Ok(ChangeType::Delete),
+            _ => Err(rusqlite::types::FromSqlError::InvalidType),
+        }
     }
 }
 
@@ -93,6 +122,9 @@ impl Store {
                     serial INTEGER
                 );
             ",
+            "
+                ALTER TABLE checkpoints ADD description TEXT
+            ",
         ];
 
         // We set the `user_version` after each update to ensure updates are not applied twice if one
@@ -149,14 +181,173 @@ impl Store {
         }
     }
 
-    pub fn add(&mut self, object: Object) -> Result<i64> {
+    pub fn checkpoint(&mut self) -> Result<Checkpoint<'_>> {
+        Checkpoint::new(self)
+    }
+
+    pub fn undo(&mut self) -> Result<()> {
+        let transaction = self.conn.transaction()?;
+
+        let (cur_checkpoint_serial, prev_checkpoint_serial) = {
+            let last_two_checkpoint_serials: Vec<i64> = transaction
+                .prepare(
+                    "SELECT serial
+                        FROM checkpoints
+                        ORDER BY serial DESC
+                        LIMIT 2
+                    ",
+                )?
+                .query_and_then(params![], |row| row.get(0).as_store_result())?
+                .collect::<Result<_>>()?;
+
+            if last_two_checkpoint_serials.len() == 0 {
+                return Ok(());
+            }
+
+            (
+                last_two_checkpoint_serials[0],
+                *last_two_checkpoint_serials.get(1).unwrap_or(&0),
+            )
+        };
+
+        let changes = transaction
+            .prepare(
+                "SELECT
+                    action, object_id, previous
+                    FROM object_changes
+                    WHERE serial > ?
+                    ORDER BY serial DESC
+            ",
+            )?
+            .query_and_then(
+                params![prev_checkpoint_serial],
+                |row| -> Result<(ChangeType, i64, String)> {
+                    Ok((row.get(0)?, row.get(1)?, (row.get(2)?)))
+                },
+            )?
+            .collect::<Result<Vec<_>>>()
+            .as_store_result()?;
+
+        dbg!(&changes);
+
+        for (change_type, object_id, previous_serialized) in changes {
+            match change_type {
+                ChangeType::Add => assert_eq!(
+                    transaction.execute(
+                        "DELETE
+                            FROM objects
+                            WHERE object_id = ?",
+                        params![object_id]
+                    )?,
+                    1
+                ),
+                ChangeType::Delete => assert_eq!(
+                    transaction.execute(
+                        "INSERT
+                            INTO objects(object_id, properties)
+                            VALUES(?, ?)
+                        ",
+                        params![object_id, previous_serialized]
+                    )?,
+                    1
+                ),
+            }
+        }
+
+        transaction.execute(
+            "DELETE
+                FROM object_changes
+                WHERE serial > ?
+            ",
+            params![prev_checkpoint_serial],
+        )?;
+
+        transaction.execute(
+            "DELETE
+                FROM checkpoints
+                WHERE serial = ?
+            ",
+            params![cur_checkpoint_serial],
+        )?;
+
+        transaction.commit()?;
+
+        Ok(())
+    }
+}
+
+pub struct Checkpoint<'a> {
+    store: &'a Store,
+    transaction: rusqlite::Transaction<'a>,
+}
+
+impl<'a> Checkpoint<'a> {
+    fn new(store: &'a mut Store) -> Result<Checkpoint> {
+        let transaction = store.conn.unchecked_transaction()?;
+
+        Ok(Checkpoint { store, transaction })
+    }
+
+    fn create_checkpoint(&self) -> Result<()> {
+        self.transaction.execute(
+            "INSERT
+                INTO checkpoints(serial)
+                VALUES(
+                    (SELECT
+                        IFNULL(MAX(serial), 0)
+                        FROM object_changes
+                    )
+                )
+            ",
+            params![],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn commit(self) -> Result<()> {
+        self.create_checkpoint()?;
+        self.transaction.commit().as_store_result()
+    }
+
+    fn record_change(
+        &self,
+        change_type: ChangeType,
+        object_id: i64,
+        previous: impl AsRef<str>,
+    ) -> Result<()> {
+        self.transaction.execute(
+            "INSERT
+                INTO object_changes(action, object_id, previous)
+                VALUES(?, ?, ?)
+            ",
+            params![change_type, object_id, previous.as_ref()],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn add(&self, object: Object) -> Result<i64> {
         let object_serialized = serde_json::to_string(&object)?;
 
-        self.conn
+        self.transaction
             .prepare("INSERT INTO objects(properties) VALUES(?)")?
             .execute(params![object_serialized])?;
 
-        Ok(self.conn.last_insert_rowid() as i64)
+        let object_id = self.store.conn.last_insert_rowid();
+        self.record_change(ChangeType::Add, object_id, "{}")?;
+
+        Ok(object_id as i64)
+    }
+
+    pub fn query(&self, query: impl Into<QueryNode>) -> MutableCollection {
+        MutableCollection {
+            checkpoint: &self,
+            collection: Collection {
+                conn: &self.transaction,
+                query: query.into(),
+            },
+        }
     }
 }
 
@@ -186,6 +377,10 @@ impl<'a> Collection<'a> {
             .query_row(params, |row| row.get::<usize, i64>(0))? as usize)
     }
 
+    pub fn exists(&self) -> Result<bool> {
+        Ok(self.len()? != 0)
+    }
+
     pub fn iter(&self) -> Result<impl Iterator<Item = Object> + 'a> {
         let (mut statement, params) =
             self.prepare_with_query("SELECT object_id, properties FROM objects")?;
@@ -212,13 +407,41 @@ impl<'a> Collection<'a> {
     }
 }
 
+pub struct MutableCollection<'a> {
+    checkpoint: &'a Checkpoint<'a>,
+    collection: Collection<'a>,
+}
+
+impl<'a> MutableCollection<'a> {
+    pub fn delete(&self) -> Result<usize> {
+        for object in self.iter()? {
+            self.checkpoint.record_change(
+                ChangeType::Delete,
+                object["object-id"].as_number().unwrap(),
+                serde_json::to_string(&object)?,
+            )?;
+        }
+
+        let (mut statement, params) = self.prepare_with_query("DELETE FROM objects")?;
+        statement.execute(params).as_store_result()
+    }
+}
+
+impl<'a> std::ops::Deref for MutableCollection<'a> {
+    type Target = Collection<'a>;
+
+    fn deref(&self) -> &Collection<'a> {
+        &self.collection
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Q;
     use tempfile::{Builder, TempDir};
 
-    fn open_store(tempdir: &TempDir, name: &str) -> Store {
+    fn open_store<'a>(tempdir: &TempDir, name: &str) -> Store {
         Store::open(tempdir.path().join(name)).unwrap()
     }
 
@@ -230,10 +453,12 @@ mod tests {
         let test_dir = test_dir();
         let mut store = open_store(&test_dir, "store.qualia");
 
-        store.add(object!("name" => "one", "blah" => "blah"))?;
-        store.add(object!("name" => "two", "blah" => "halb"))?;
-        store.add(object!("name" => "three", "blah" => "BLAH"))?;
-        store.add(object!("name" => "four", "blah" => "blahblah"))?;
+        let checkpoint = store.checkpoint()?;
+        checkpoint.add(object!("name" => "one", "blah" => "blah"))?;
+        checkpoint.add(object!("name" => "two", "blah" => "halb"))?;
+        checkpoint.add(object!("name" => "three", "blah" => "BLAH"))?;
+        checkpoint.add(object!("name" => "four", "blah" => "blahblah"))?;
+        checkpoint.commit()?;
 
         Ok((store, test_dir))
     }
@@ -278,6 +503,25 @@ mod tests {
     }
 
     #[test]
+    fn adding_objects_can_be_undone() -> Result<()> {
+        let (mut store, _test_dir) = populated_store()?;
+
+        let checkpoint = store.checkpoint()?;
+        let object_id = checkpoint.add(object!("name" => "b", "c" => "d"))?;
+        checkpoint.commit()?;
+
+        assert!(store.query(Q.id(object_id)).exists()?);
+        assert_eq!(store.all().len()?, 5);
+
+        store.undo()?;
+
+        assert!(!store.query(Q.id(object_id)).exists()?);
+        assert_eq!(store.all().len()?, 4);
+
+        Ok(())
+    }
+
+    #[test]
     fn added_objects_can_be_found() -> Result<()> {
         let (store, _test_dir) = populated_store()?;
 
@@ -298,10 +542,58 @@ mod tests {
     }
 
     #[test]
+    fn objects_can_be_deleted() -> Result<()> {
+        let (mut store, _test_dir) = populated_store()?;
+
+        let checkpoint = store.checkpoint()?;
+        let object_id = checkpoint.add(object!("name" => "b", "c" => "d"))?;
+        checkpoint.commit()?;
+
+        let checkpoint = store.checkpoint()?;
+        checkpoint.query(Q.id(object_id)).delete()?;
+        checkpoint.commit()?;
+
+        assert!(!store.query(Q.id(object_id)).exists()?);
+        assert_eq!(store.all().len()?, 4);
+
+        Ok(())
+    }
+
+    #[test]
+    fn deleting_objects_can_be_undone() -> Result<()> {
+        let (mut store, _test_dir) = populated_store()?;
+
+        let checkpoint = store.checkpoint()?;
+        assert_eq!(checkpoint.query(Q.equal("name", "one")).delete()?, 1);
+        checkpoint.commit()?;
+
+        store.undo()?;
+
+        assert!(store.query(Q.equal("name", "one")).exists()?);
+        assert_eq!(store.all().len()?, 4);
+
+        Ok(())
+    }
+
+    #[test]
+    fn can_undo_to_an_empty_store() -> Result<()> {
+        let (mut store, _test_dir) = populated_store()?;
+
+        store.undo()?;
+        assert_eq!(store.all().len()?, 0);
+
+        store.undo()?;
+
+        Ok(())
+    }
+
+    #[test]
     fn objects_can_be_found_by_their_object_id() -> Result<()> {
         let (mut store, _test_dir) = populated_store()?;
 
-        let object_id = store.add(object!("name" => "b", "c" => "d"))?;
+        let checkpoint = store.checkpoint()?;
+        let object_id = checkpoint.add(object!("name" => "b", "c" => "d"))?;
+        checkpoint.commit()?;
 
         let found = store.query(Q.id(object_id));
 
