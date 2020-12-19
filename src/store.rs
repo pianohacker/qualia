@@ -1,5 +1,3 @@
-//! A document store with a flexible query language and built-in undo support.
-
 use regex::Regex;
 use rusqlite::{params, Connection};
 use std::path::Path;
@@ -10,8 +8,10 @@ use thiserror::Error;
 use crate::object::*;
 use crate::query::QueryNode;
 
+/// Convenience type for possibly returning a [`StoreError`].
 pub type Result<T, E = StoreError> = Result_<T, E>;
 
+/// All errors that may be returned from a [`Store`].
 #[derive(Error, Debug)]
 pub enum StoreError {
     #[error("could not de/serialize object")]
@@ -63,11 +63,13 @@ impl rusqlite::types::FromSql for ChangeType {
     }
 }
 
+/// A set of objects stored on disk.
 pub struct Store {
     conn: Connection,
 }
 
 impl Store {
+    /// Open a store at the given path.
     pub fn open(path: impl AsRef<Path>) -> Result<Store> {
         let mut store = Store {
             conn: Connection::open(path)?,
@@ -167,6 +169,7 @@ impl Store {
         )?)
     }
 
+    /// Get a [`Collection`] of all objects.
     pub fn all(&self) -> Collection {
         Collection {
             conn: &self.conn,
@@ -174,6 +177,10 @@ impl Store {
         }
     }
 
+    /// Get a [`Collection`] of the objects matching the given query.
+    ///
+    /// This can take either a [`QueryNode`] or [`QueryBuilder`](crate::query_builder::QueryBuilder); you almost certainly want to use
+    /// the latter.
     pub fn query(&self, query: impl Into<QueryNode>) -> Collection {
         Collection {
             conn: &self.conn,
@@ -181,10 +188,17 @@ impl Store {
         }
     }
 
+    /// Start a [`Checkpoint`] on the store. All modifications must be done through a checkpoint.
+    ///
+    /// This method takes a mutable reference to ensure that only one checkpoint can be active at a given time.
     pub fn checkpoint(&mut self) -> Result<Checkpoint<'_>> {
         Checkpoint::new(self)
     }
 
+    /// Undo all changes in the last checkpoint.
+    ///
+    /// Returns the description of the undone checkpoint, if any. If no checkpoints exists, returns
+    /// [`None`].
     pub fn undo(&mut self) -> Result<Option<String>> {
         let transaction = self.conn.transaction()?;
 
@@ -283,6 +297,7 @@ impl Store {
     }
 }
 
+/// A set of not-yet-committed changes to a [`Store`], as created by [`Store::checkpoint()`].
 pub struct Checkpoint<'a> {
     store: &'a Store,
     transaction: rusqlite::Transaction<'a>,
@@ -313,6 +328,7 @@ impl<'a> Checkpoint<'a> {
         Ok(())
     }
 
+    /// Commit this transaction with the given description.
     pub fn commit(self, description: impl AsRef<str>) -> Result<()> {
         self.create_checkpoint(description.as_ref())?;
         self.transaction.commit().as_store_result()
@@ -335,6 +351,9 @@ impl<'a> Checkpoint<'a> {
         Ok(())
     }
 
+    /// Add an object to the store.
+    ///
+    /// Returns the ID of the newly created object.
     pub fn add(&self, object: Object) -> Result<i64> {
         let object_serialized = serde_json::to_string(&object)?;
 
@@ -348,6 +367,10 @@ impl<'a> Checkpoint<'a> {
         Ok(object_id as i64)
     }
 
+    /// Get a [`MutableCollection`] of the objects matching the given query.
+    ///
+    /// This can take either a [`QueryNode`] or [`QueryBuilder`](crate::query_builder::QueryBuilder); you almost certainly want to use
+    /// the latter.
     pub fn query(&self, query: impl Into<QueryNode>) -> MutableCollection {
         MutableCollection {
             checkpoint: &self,
@@ -367,6 +390,16 @@ impl<'a> std::ops::Deref for Checkpoint<'a> {
     }
 }
 
+/// A reference to the set of objects matching a given query, as returned by [`Store::all()`] or
+/// [`Store::query()`].
+///
+/// All actions on a collection are lazy; no queries are run or objects fetched until a method is
+/// called. The collection also doesn't hold on to the objects; if any of them are deleted or modified,
+/// future calls will return the new state.
+///
+/// A collection may be used multiple times. For instance, it's valid to call
+/// [`.len()`](Collection::len) and
+/// [`.iter()`](Collection::iter) on the same [`Collection`] object.
 pub struct Collection<'a> {
     conn: &'a Connection,
     query: QueryNode,
@@ -385,6 +418,7 @@ impl<'a> Collection<'a> {
         ))
     }
 
+    /// Get the number of objects in the collection.
     pub fn len(&self) -> Result<usize> {
         let (mut statement, params) = self.prepare_with_query("SELECT COUNT(*) FROM objects")?;
         Ok(statement
@@ -393,10 +427,14 @@ impl<'a> Collection<'a> {
             .query_row(params, |row| row.get::<usize, i64>(0))? as usize)
     }
 
+    /// Returns true if there are any objects in the collection.
     pub fn exists(&self) -> Result<bool> {
         Ok(self.len()? != 0)
     }
 
+    /// Iterate over all objects in the collection.
+    ///
+    /// This prefetches all objects in the collection so that errors can be reported early.
     pub fn iter(&self) -> Result<impl Iterator<Item = Object> + 'a> {
         let (mut statement, params) =
             self.prepare_with_query("SELECT object_id, properties FROM objects")?;
@@ -423,12 +461,19 @@ impl<'a> Collection<'a> {
     }
 }
 
+/// A reference to a modifiable set of objects matching a given query, as returned by
+/// [`Checkpoint::query()`].
+///
+/// All methods of [`Collection`] are available for [`MutableCollection`].
 pub struct MutableCollection<'a> {
     checkpoint: &'a Checkpoint<'a>,
     collection: Collection<'a>,
 }
 
 impl<'a> MutableCollection<'a> {
+    /// Delete all objects in the collection.
+    ///
+    /// Returns the number of deleted objects.
     pub fn delete(&self) -> Result<usize> {
         for object in self.iter()? {
             self.checkpoint.record_change(

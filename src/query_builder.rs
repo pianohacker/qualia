@@ -2,16 +2,25 @@ use crate::object::PropValue;
 use crate::query::QueryNode;
 use crate::query::QueryNode::*;
 
+/// A convenience class for creating [`QueryNode`] objects. This enum should be used by calling
+/// methods on [`Q`], rather than by creating a new [`QueryBuilder`] yourself.
+///
+/// A [`QueryBuilder`] starts out empty. Each call to [`.id()`](QueryBuilder::id), [`.equal()`](QueryBuilder::equal), or [`.like()`](QueryBuilder::like) will add a new criteria to the query. All these criteria are then ANDed together.
 pub enum QueryBuilder {
+    #[doc(hidden)]
     Empty,
+    #[doc(hidden)]
     Single(QueryNode),
+    #[doc(hidden)]
     And(Vec<QueryNode>),
 }
 
+/// A blank [`QueryBuilder`] object, to be used instead of constructing new [`QueryBuilder`]
+/// objects.
 pub const Q: QueryBuilder = QueryBuilder::Empty;
 
 impl QueryBuilder {
-    pub fn add(self, node: QueryNode) -> Self {
+    fn add(self, node: QueryNode) -> Self {
         match self {
             QueryBuilder::Empty => QueryBuilder::Single(node),
             QueryBuilder::Single(prev_node) => QueryBuilder::And(vec![prev_node, node]),
@@ -22,6 +31,7 @@ impl QueryBuilder {
         }
     }
 
+    /// Add the criteria that the object have the given ID.
     pub fn id(self, value: impl Into<i64>) -> Self {
         self.add(PropEqual {
             name: "object-id".into(),
@@ -29,6 +39,7 @@ impl QueryBuilder {
         })
     }
 
+    /// Add the criteria that the given field has exactly the given value.
     pub fn equal(self, name: impl Into<String>, value: impl Into<PropValue>) -> Self {
         self.add(PropEqual {
             name: name.into(),
@@ -36,13 +47,17 @@ impl QueryBuilder {
         })
     }
 
-    pub fn like(self, name: impl Into<String>, value: impl Into<String>) -> Self {
+    /// Add the criteria that the given field have contents matching the given value.
+    ///
+    /// See [`PropLike`] for the supported syntax.
+    pub fn like(self, name: impl Into<String>, pattern: impl Into<String>) -> Self {
         self.add(PropLike {
             name: name.into(),
-            value: value.into(),
+            pattern: pattern.into(),
         })
     }
 
+    /// Consume this [`QueryBuilder`] and build a [`QueryNode`].
     pub fn build(self) -> QueryNode {
         match self {
             QueryBuilder::Single(node) => node,
@@ -101,7 +116,7 @@ mod tests {
                 Q.like("name", "phrase").build(),
                 PropLike {
                     name: "name".to_string(),
-                    value: "phrase".to_string(),
+                    pattern: "phrase".to_string(),
                 },
             ),
             builder_test!(

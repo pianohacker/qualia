@@ -2,11 +2,40 @@ use rusqlite::ToSql;
 
 use crate::object::PropValue;
 
+/// A node within a query tree.
+///
+/// For all but advanced cases, [`QueryBuilder`](crate::query_builder::QueryBuilder) should be used
+/// (via [`Q`](crate::query_builder::Q)) rather than creating QueryNode objects directly.
 #[derive(Debug, PartialEq)]
 pub enum QueryNode {
+    /// Will match all objects.
     Empty,
+
+    /// Will match objects that have the given property with exactly the given value.
     PropEqual { name: String, value: PropValue },
-    PropLike { name: String, value: String },
+
+    /// Will match objects that the given property with contents matching the given pattern.
+    ///
+    /// The pattern is composed of a set of words, each one of which must exist in order (though
+    /// there may be other words in between). Each word may be just an alphanumeric word or may
+    /// contain one or more `*`'s, each of which will match zero or more characters.
+    ///
+    /// For example, the following patterns will match the property value `"why the lucky stiff"`:
+    ///   * `why`
+    ///   * `why lucky`
+    ///   * `why luck*`
+    ///   * `why luck*y`
+    ///   * `*tiff`
+    ///   * `the *ck*`
+    ///
+    /// while the following patterns will not:
+    ///   * `wh`
+    ///   * `lucky why`
+    ///   * `matts`
+    ///   * `wha*`
+    PropLike { name: String, pattern: String },
+
+    /// Will match all objects that match each of the contained criteria.
     And(Vec<QueryNode>),
 }
 
@@ -26,11 +55,11 @@ impl ToSql for PropValue {
 }
 
 impl QueryNode {
-    pub fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
+    pub(crate) fn to_sql_clause(&self) -> (String, Vec<Box<dyn ToSql>>) {
         match self {
             QueryNode::Empty => ("1=1".to_string(), vec_params![]),
             QueryNode::PropEqual { name, value } => Self::equal_to_sql_clause(name, value),
-            QueryNode::PropLike { name, value } => Self::like_to_sql_clause(name, value),
+            QueryNode::PropLike { name, pattern } => Self::like_to_sql_clause(name, pattern),
             QueryNode::And(nodes) => Self::and_to_sql_clause(nodes),
         }
     }
@@ -55,8 +84,8 @@ impl QueryNode {
         )
     }
 
-    fn like_to_sql_clause(name: &String, value: &String) -> (String, Vec<Box<dyn ToSql>>) {
-        let words = value.split(" ").filter(|word| word != &"");
+    fn like_to_sql_clause(name: &String, pattern: &String) -> (String, Vec<Box<dyn ToSql>>) {
+        let words = pattern.split(" ").filter(|word| word != &"");
         let wrapped_words: Vec<String> = words
             .map(|word| {
                 let pieces = word.split("*");
@@ -150,7 +179,7 @@ mod tests {
                 "simple word like",
                 PropLike {
                     name: "name".to_string(),
-                    value: "phrase".to_string(),
+                    pattern: "phrase".to_string(),
                 },
                 "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
                 [r"(?i)\bphrase\b"],
@@ -159,7 +188,7 @@ mod tests {
                 "prefix word like",
                 PropLike {
                     name: "name".to_string(),
-                    value: "phr*".to_string(),
+                    pattern: "phr*".to_string(),
                 },
                 "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
                 [r"(?i)\bphr\w*\b"],
@@ -168,7 +197,7 @@ mod tests {
                 "suffix word like",
                 PropLike {
                     name: "name".to_string(),
-                    value: "*ase".to_string(),
+                    pattern: "*ase".to_string(),
                 },
                 "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
                 [r"(?i)\b\w*ase\b"],
@@ -177,7 +206,7 @@ mod tests {
                 "mid-word like",
                 PropLike {
                     name: "name".to_string(),
-                    value: "*ras*".to_string(),
+                    pattern: "*ras*".to_string(),
                 },
                 "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
                 [r"(?i)\b\w*ras\w*\b"],
@@ -186,7 +215,7 @@ mod tests {
                 "multi-word like",
                 PropLike {
                     name: "name".to_string(),
-                    value: "lon* *hrase".to_string(),
+                    pattern: "lon* *hrase".to_string(),
                 },
                 "CAST(json_extract(properties, \"$.name\") AS TEXT) REGEXP ?",
                 [r"(?i)\blon\w*\b.*?\b\w*hrase\b"],

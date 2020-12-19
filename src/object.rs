@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// All possible types that can be stored inside an [`Object`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PropValue {
@@ -9,8 +10,10 @@ pub enum PropValue {
     String(String),
 }
 
+/// A set of properties that may be stored in a [`Store`](crate::Store).
 pub type Object = HashMap<String, PropValue>;
 
+/// Convenience macro for creating an [`Object`].
 #[macro_export]
 macro_rules! object {
     ( $($key:expr => $value:expr $(,)?)* ) => {{
@@ -24,6 +27,7 @@ macro_rules! object {
 }
 
 impl PropValue {
+    /// If this [`PropValue`] contains a [`String`], return it. If not, return [`None`].
     pub fn as_str(&self) -> Option<&String> {
         match self {
             PropValue::String(s) => Some(s),
@@ -31,6 +35,7 @@ impl PropValue {
         }
     }
 
+    /// If this [`PropValue`] contains an [`i64`], return it. If not, return [`None`].
     pub fn as_number(&self) -> Option<i64> {
         match self {
             PropValue::Number(n) => Some(*n),
