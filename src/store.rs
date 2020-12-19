@@ -237,8 +237,6 @@ impl Store {
             .collect::<Result<Vec<_>>>()
             .as_store_result()?;
 
-        dbg!(&changes);
-
         for (change_type, object_id, previous_serialized) in changes {
             match change_type {
                 ChangeType::Add => assert_eq!(
