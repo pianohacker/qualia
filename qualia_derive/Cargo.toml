@@ -1,0 +1,10 @@
+[package]
+name = "qualia_derive"
+description = "Derive macros for Qualia"
+version = "0.1.0"
+repository = "https://github.com/pianohacker/qualia"
+license = "MPL-2.0"
+authors = ["Jesse Weaver <pianohacker@gmail.com>"]
+edition = "2018"
+
+[dependencies]
