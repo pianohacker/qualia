@@ -359,6 +359,14 @@ impl<'a> Checkpoint<'a> {
     }
 }
 
+impl<'a> std::ops::Deref for Checkpoint<'a> {
+    type Target = Store;
+
+    fn deref(&self) -> &Store {
+        &self.store
+    }
+}
+
 pub struct Collection<'a> {
     conn: &'a Connection,
     query: QueryNode,
