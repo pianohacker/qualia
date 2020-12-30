@@ -1,0 +1,11 @@
+error: Can only derive ObjectType from a struct with named fields
+ --> $DIR/only-named-fields.rs:5:11
+  |
+5 | struct Foo();
+  |           ^^
+
+error: Can only derive ObjectType from a struct with named fields
+ --> $DIR/only-named-fields.rs:8:12
+  |
+8 | struct Foo2;
+  |            ^
