@@ -46,10 +46,29 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
                     _ => return Err(field.ty.span()),
                 };
 
+                let field_name = field.ident.clone().unwrap().to_string();
+
                 let field_type_accessor = if field_type.path.is_ident("i64") {
-                    quote!(as_number().unwrap())
+                    quote!(
+                        as_number()
+                            .ok_or(
+                                qualia::ConversionError::FieldWrongType(
+                                    #field_name.to_string(),
+                                    "number".to_string(),
+                                ),
+                            )?
+                    )
                 } else if field_type.path.is_ident("String") {
-                    quote!(as_str().unwrap().clone())
+                    quote!(
+                        as_str()
+                            .ok_or(
+                                qualia::ConversionError::FieldWrongType(
+                                    #field_name.to_string(),
+                                    "string".to_string(),
+                                ),
+                            )?
+                            .clone()
+                    )
                 } else {
                     return Err(field_type.path.span());
                 };
@@ -74,7 +93,12 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
 
             fn try_from(object: qualia::Object) -> std::result::Result<#orig_type_name, qualia::ConversionError> {
                 Ok(#orig_type_name {
-                    #(#field_names: object.get(#field_name_strings).unwrap().#field_accessors),*
+                    #(
+                        #field_names: object
+                            .get(#field_name_strings)
+                            .ok_or(qualia::ConversionError::FieldMissing(#field_name_strings.to_string()))?
+                            .#field_accessors
+                    ),*
                 })
             }
         }

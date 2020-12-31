@@ -17,6 +17,7 @@ quote = "1.0"
 syn = "1.0"
 
 [dev-dependencies]
+predicates = "1.0"
 syn = { version = "1.0", features = ["extra-traits"] }
 qualia = { path = "../qualia" }
 tempfile = "3.1" # A library for managing a temporary directory and deleting all contents when it's dropped.
