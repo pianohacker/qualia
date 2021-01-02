@@ -1,7 +1,7 @@
 [package]
 name = "qualia_derive"
 description = "Derive macros for Qualia"
-version = "0.1.0"
+version = "0.2.0"
 
 repository = "https://github.com/pianohacker/qualia"
 license = "MPL-2.0"
@@ -19,6 +19,6 @@ syn = "1.0"
 [dev-dependencies]
 predicates = "1.0"
 syn = { version = "1.0", features = ["extra-traits", "full"] }
-qualia = { path = "../qualia" }
+qualia = { path = "../" }
 tempfile = "3.1" # A library for managing a temporary directory and deleting all contents when it's dropped.
 trybuild = "1.0" # Test harness for ui tests of compiler diagnostics
