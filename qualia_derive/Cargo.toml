@@ -3,7 +3,7 @@ name = "qualia_derive"
 description = "Derive macros for Qualia"
 version = "0.2.0"
 
-repository = "https://github.com/pianohacker/qualia"
+repository = "https://github.com/pianohacker/qualia/blob/master/qualia_derive"
 license = "MPL-2.0"
 authors = ["Jesse Weaver <pianohacker@gmail.com>"]
 edition = "2018"
