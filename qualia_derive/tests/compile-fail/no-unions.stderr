@@ -1,0 +1,5 @@
+error: can only derive ObjectShape on a struct
+ --> $DIR/no-unions.rs:5:1
+  |
+5 | union Foo {
+  | ^^^^^
