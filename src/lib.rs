@@ -8,6 +8,8 @@ pub mod store;
 #[doc(inline)]
 pub use object::*;
 #[doc(inline)]
+pub use qualia_derive::ObjectShape;
+#[doc(inline)]
 pub use query_builder::Q;
 #[doc(inline)]
 pub use store::*;

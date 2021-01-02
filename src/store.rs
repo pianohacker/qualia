@@ -1,5 +1,6 @@
 use regex::Regex;
 use rusqlite::{params, Connection};
+use std::convert::TryInto;
 use std::path::Path;
 use std::result::Result as Result_;
 use std::sync::Arc;
@@ -14,6 +15,9 @@ pub type Result<T, E = StoreError> = Result_<T, E>;
 /// All errors that may be returned from a [`Store`].
 #[derive(Error, Debug)]
 pub enum StoreError {
+    #[error("could not convert object to shape")]
+    Conversion(#[from] ConversionError),
+
     #[error("could not de/serialize object")]
     Serialization(#[from] serde_json::Error),
 
@@ -443,7 +447,7 @@ impl<'a> Collection<'a> {
             Ok((row.get::<usize, i64>(0)?, row.get::<usize, String>(1)?))
         })?;
 
-        let result = Ok(rows
+        Ok(rows
             .map(|r: rusqlite::Result<(i64, String)>| {
                 r.as_store_result()
                     .and_then(|(object_id, serialized_object)| {
@@ -455,9 +459,18 @@ impl<'a> Collection<'a> {
                     })
             })
             .collect::<Result<Vec<Object>>>()?
-            .into_iter());
+            .into_iter())
+    }
 
-        result
+    /// Iterate over all objects in the collection, converting them to the given shape.
+    ///
+    /// This prefetches all objects in the collection so that errors can be reported early.
+    pub fn iter_as<T: ObjectShape + 'a>(&self) -> Result<impl Iterator<Item = T> + 'a> {
+        Ok(self
+            .iter()?
+            .map(|object| object.try_into().as_store_result())
+            .collect::<Result<Vec<T>>>()?
+            .into_iter())
     }
 }
 
@@ -499,7 +512,7 @@ impl<'a> std::ops::Deref for MutableCollection<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Q;
+    use crate::{ObjectShape, Q};
     use tempfile::{Builder, TempDir};
 
     fn open_store<'a>(tempdir: &TempDir, name: &str) -> Store {
@@ -557,6 +570,40 @@ mod tests {
                 object!("name" => "one", "blah" => "blah", "object-id" => 1),
                 object!("name" => "three", "blah" => "BLAH", "object-id" => 3),
                 object!("name" => "two", "blah" => "halb", "object-id" => 2),
+            ],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn objects_can_be_iterated_as_a_shape() -> Result<()> {
+        let (store, _test_dir) = populated_store()?;
+
+        use crate as qualia;
+        #[derive(Debug, ObjectShape, PartialEq)]
+        struct Blah {
+            name: String,
+        }
+
+        let mut all_blah: Vec<_> = store.all().iter_as::<Blah>()?.collect();
+        all_blah.sort_by_key(|blah| blah.name.clone());
+
+        assert_eq!(
+            all_blah,
+            vec![
+                Blah {
+                    name: "four".to_string()
+                },
+                Blah {
+                    name: "one".to_string()
+                },
+                Blah {
+                    name: "three".to_string()
+                },
+                Blah {
+                    name: "two".to_string()
+                },
             ],
         );
 

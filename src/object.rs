@@ -1,6 +1,7 @@
 #![macro_use]
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use thiserror::Error;
 
 /// All possible types that can be stored inside an [`Object`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -12,6 +13,24 @@ pub enum PropValue {
 
 /// A set of properties that may be stored in a [`Store`](crate::Store).
 pub type Object = HashMap<String, PropValue>;
+
+/// All errors that may be returned from a [`Store`].
+#[derive(Error, Debug)]
+pub enum ConversionError {
+    // Returned when a necessary field is missing.
+    #[error("field {0} is missing")]
+    FieldMissing(String),
+
+    // Returned when a field can't be converted to the necessary type.
+    #[error("field {0} can't be converted to {1}")]
+    FieldWrongType(String, String),
+}
+
+/// A type that can be converted to and from an object.
+pub trait ObjectShape:
+    std::convert::TryFrom<Object, Error = ConversionError> + std::convert::Into<Object>
+{
+}
 
 /// Convenience macro for creating an [`Object`].
 #[macro_export]
