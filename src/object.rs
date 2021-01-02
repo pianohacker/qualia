@@ -24,6 +24,10 @@ pub enum ConversionError {
     // Returned when a field can't be converted to the necessary type.
     #[error("field {0} can't be converted to {1}")]
     FieldWrongType(String, String),
+
+    // Returned when a field can't be converted to the necessary type.
+    #[error("fixed field {0} should be {1:?}, is {2:?}")]
+    FixedFieldWrongValue(String, PropValue, PropValue),
 }
 
 /// A type that can be converted to and from an object.
