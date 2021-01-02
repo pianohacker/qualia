@@ -93,3 +93,43 @@ fn can_convert_to_object() -> Result<(), ConversionError> {
 
     Ok(())
 }
+
+#[test]
+fn can_convert_with_custom_field_names() -> Result<(), ConversionError> {
+    #[derive(Debug, ObjectShape, PartialEq)]
+    struct CustomShape {
+        #[object_field("my-name")]
+        name: String,
+        width: i64,
+        height: i64,
+    }
+
+    let shape: Object = CustomShape {
+        name: "letter".to_string(),
+        width: 8,
+        height: 11,
+    }
+    .into();
+
+    assert_eq!(
+        shape,
+        object!("my-name" => "letter", "width" => 8, "height" => 11),
+    );
+
+    let obj: Object = object!(
+        "my-name" => "letter",
+        "width" => 8,
+        "height" => 11,
+    );
+
+    assert_eq!(
+        CustomShape::try_from(obj)?,
+        CustomShape {
+            name: "letter".to_string(),
+            width: 8,
+            height: 11,
+        }
+    );
+
+    Ok(())
+}

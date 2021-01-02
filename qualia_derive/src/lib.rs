@@ -1,7 +1,6 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{quote, quote_spanned};
-use syn::spanned::Spanned;
 use syn::{parse_macro_input, DeriveInput};
 
 macro_rules! error_stream {
@@ -19,51 +18,86 @@ macro_rules! try_or_context {
     };
 }
 
-fn build_names_and_accessors(
-    named_fields: &syn::FieldsNamed,
-) -> Result<Vec<(proc_macro2::Ident, syn::export::TokenStream2)>, proc_macro2::Span> {
+fn parse_field_name(field: &syn::Field) -> syn::Result<String> {
+    if let Some(attr) = field
+        .attrs
+        .iter()
+        .find(|attr| attr.style == syn::AttrStyle::Outer && attr.path.is_ident("object_field"))
+    {
+        attr.parse_args::<syn::LitStr>().map(|lit| lit.value())
+    } else {
+        Ok(field.ident.clone().unwrap().to_string())
+    }
+}
+
+struct ParsedField {
+    ident: proc_macro2::Ident,
+    name: String,
+    accessor: syn::export::TokenStream2,
+}
+
+fn parse_fields(named_fields: &syn::FieldsNamed) -> syn::Result<Vec<ParsedField>> {
     named_fields
         .named
         .iter()
         .map(|field| {
             let field_type = match &field.ty {
                 syn::Type::Path(p) => p,
-                _ => return Err(field.ty.span()),
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        &field.ty,
+                        "fields in ObjectShape must be i64 or String",
+                    ))
+                }
             };
 
-            let field_name = field.ident.clone().unwrap().to_string();
+            let field_name = parse_field_name(&field)?;
+
+            let base_accessor = quote!(
+                get(#field_name)
+                .ok_or(qualia::ConversionError::FieldMissing(#field_name.to_string()))?
+            );
 
             let field_type_accessor = if field_type.path.is_ident("i64") {
-                quote!(
-                    as_number()
-                        .ok_or(
-                            qualia::ConversionError::FieldWrongType(
-                                #field_name.to_string(),
-                                "number".to_string(),
-                            ),
-                        )?
-                )
+                Ok(quote!(
+                    #base_accessor
+                    .as_number()
+                    .ok_or(
+                        qualia::ConversionError::FieldWrongType(
+                            #field_name.to_string(),
+                            "number".to_string(),
+                        ),
+                    )?
+                ))
             } else if field_type.path.is_ident("String") {
-                quote!(
-                    as_str()
-                        .ok_or(
-                            qualia::ConversionError::FieldWrongType(
-                                #field_name.to_string(),
-                                "string".to_string(),
-                            ),
-                        )?
-                        .clone()
-                )
+                Ok(quote!(
+                    #base_accessor
+                    .as_str()
+                    .ok_or(
+                        qualia::ConversionError::FieldWrongType(
+                            #field_name.to_string(),
+                            "string".to_string(),
+                        ),
+                    )?
+                    .clone()
+                ))
             } else {
-                return Err(field_type.path.span());
-            };
+                Err(syn::Error::new_spanned(
+                    &field_type.path,
+                    "fields in ObjectShape must be i64 or String",
+                ))
+            }?;
 
-            Ok((field.ident.clone().unwrap(), field_type_accessor))
+            Ok(ParsedField {
+                ident: field.ident.clone().unwrap(),
+                name: field_name,
+                accessor: field_type_accessor,
+            })
         })
         .collect()
 }
 
-#[proc_macro_derive(ObjectShape)]
+#[proc_macro_derive(ObjectShape, attributes(object_field))]
 pub fn derive_object_shape(input: TokenStream) -> TokenStream {
     let parsed_struct = parse_macro_input!(input as DeriveInput);
     let orig_type_name = parsed_struct.ident;
@@ -86,18 +120,20 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
         "Can only derive ObjectType from a struct with named fields",
     );
 
-    let field_names_and_accessors = try_or_context!(
-        build_names_and_accessors(&named_fields),
-        "fields in ObjectShape must be i64 or String",
-    );
+    let parsed_fields = match parse_fields(&named_fields) {
+        Ok(x) => x,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
-    let (field_names, field_accessors): (Vec<_>, Vec<_>) =
-        field_names_and_accessors.into_iter().unzip();
+    let mut field_names = Vec::new();
+    let mut field_idents = Vec::new();
+    let mut field_accessors = Vec::new();
 
-    let field_name_strings: Vec<_> = field_names
-        .iter()
-        .map(|field_name| field_name.to_string())
-        .collect();
+    for f in parsed_fields.into_iter() {
+        field_names.push(f.name);
+        field_idents.push(f.ident);
+        field_accessors.push(f.accessor);
+    }
 
     quote!(
         impl std::convert::TryFrom<qualia::Object> for #orig_type_name {
@@ -105,12 +141,7 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
 
             fn try_from(object: qualia::Object) -> std::result::Result<#orig_type_name, qualia::ConversionError> {
                 Ok(#orig_type_name {
-                    #(
-                        #field_names: object
-                            .get(#field_name_strings)
-                            .ok_or(qualia::ConversionError::FieldMissing(#field_name_strings.to_string()))?
-                            .#field_accessors
-                    ),*
+                    #(#field_idents: object.#field_accessors),*
                 })
             }
         }
@@ -118,13 +149,11 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
         impl std::convert::Into<qualia::Object> for #orig_type_name {
             fn into(self) -> qualia::Object {
                 object!(
-                    #(#field_name_strings => self.#field_names),*
+                    #(#field_names => self.#field_idents),*
                 )
             }
         }
 
-        impl qualia::ObjectShape for #orig_type_name {
-            fn id(&self) -> i64 { todo!() }
-        }
+        impl qualia::ObjectShape for #orig_type_name {}
     ).into()
 }

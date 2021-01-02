@@ -8,4 +8,4 @@ error: fields in ObjectShape must be i64 or String
   --> $DIR/only-supported-field-types.rs:14:8
    |
 14 |     b: &'a str,
-   |        ^
+   |        ^^^^^^^
