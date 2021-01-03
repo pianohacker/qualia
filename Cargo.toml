@@ -4,12 +4,14 @@ description = "Basic semi-schemaless document store"
 version = "0.8.0"
 
 repository = "https://github.com/pianohacker/qualia"
+documentation = "https://docs.rs/qualia"
+
 license = "MPL-2.0"
 authors = ["Jesse Weaver <pianohacker@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-qualia_derive = { path = "./qualia_derive", version = "0.8.0" }
+qualia_derive = { path = "./qualia_derive", version = "0.8" }
 rusqlite = { version = "0.24", features = ["functions"] } # Ergonomic wrapper for SQLite
 thiserror = "1.0" # derive(Error)
 serde = { version = "1.0", features = ["derive"] } # A generic serialization/deserialization framework

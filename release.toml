@@ -1,0 +1,3 @@
+no-dev-version = true
+dependent-version = "upgrade"
+consolidate-commits = true
