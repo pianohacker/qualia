@@ -1,7 +1,7 @@
 [package]
 name = "qualia_derive"
 description = "Derive macros for Qualia"
-version = "0.8.0"
+version = "0.8.1"
 
 repository = "https://github.com/pianohacker/qualia/blob/master/qualia_derive"
 documentation = "https://docs.rs/qualia_derive"
