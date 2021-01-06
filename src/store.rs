@@ -45,6 +45,7 @@ where
 enum ChangeType {
     Add,
     Delete,
+    Update,
 }
 
 impl rusqlite::ToSql for ChangeType {
@@ -52,6 +53,7 @@ impl rusqlite::ToSql for ChangeType {
         match self {
             ChangeType::Add => "add",
             ChangeType::Delete => "delete",
+            ChangeType::Update => "update",
         }
         .to_sql()
     }
@@ -62,6 +64,7 @@ impl rusqlite::types::FromSql for ChangeType {
         match value.as_str()? {
             "add" => Ok(ChangeType::Add),
             "delete" => Ok(ChangeType::Delete),
+            "update" => Ok(ChangeType::Update),
             _ => Err(rusqlite::types::FromSqlError::InvalidType),
         }
     }
@@ -273,6 +276,17 @@ impl Store {
                             VALUES(?, ?)
                         ",
                         params![object_id, previous_serialized]
+                    )?,
+                    1
+                ),
+                ChangeType::Update => assert_eq!(
+                    transaction.execute(
+                        "UPDATE
+                            objects
+                            SET properties = ?
+                            WHERE object_id = ?
+                        ",
+                        params![previous_serialized, object_id]
                     )?,
                     1
                 ),
@@ -497,6 +511,32 @@ impl<'a> MutableCollection<'a> {
         }
 
         let (mut statement, params) = self.prepare_with_query("DELETE FROM objects")?;
+        statement.execute(params).as_store_result()
+    }
+
+    /// Set the given fields on objects in the collection.
+    ///
+    /// Returns the number of updated objects.
+    pub fn set(&self, fields: Object) -> Result<usize> {
+        if fields.len() == 0 {
+            return Ok(0);
+        }
+
+        for object in self.iter()? {
+            self.checkpoint.record_change(
+                ChangeType::Update,
+                object["object-id"].as_number().unwrap(),
+                serde_json::to_string(&object)?,
+            )?;
+        }
+
+        let fields_serialized = serde_json::to_string(&fields)?;
+
+        let (mut statement, mut params) =
+            self.prepare_with_query("UPDATE objects SET properties = json_patch(properties, ?)")?;
+
+        params.insert(0, Box::new(fields_serialized) as Box<dyn rusqlite::ToSql>);
+
         statement.execute(params).as_store_result()
     }
 }
@@ -748,6 +788,40 @@ mod tests {
         assert_eq!(
             found_objects,
             vec![object!("name" => "one", "blah" => "blah", "object-id" => 1),],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn objects_can_be_modified() -> Result<()> {
+        let (mut store, _test_dir) = populated_store()?;
+
+        let checkpoint = store.checkpoint()?;
+        assert_eq!(checkpoint.query(Q.id(1)).set(object!("name" => "wun"))?, 1);
+        checkpoint.commit("change 1")?;
+
+        assert_eq!(
+            store.query(Q.id(1)).iter()?.collect::<Vec<Object>>(),
+            vec![object!("name" => "wun", "blah" => "blah", "object-id" => 1)],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn objects_modification_can_be_undone() -> Result<()> {
+        let (mut store, _test_dir) = populated_store()?;
+
+        let checkpoint = store.checkpoint()?;
+        assert_eq!(checkpoint.query(Q.id(1)).set(object!("name" => "wun"))?, 1);
+        checkpoint.commit("change 1")?;
+
+        store.undo()?;
+
+        assert_eq!(
+            store.query(Q.id(1)).iter()?.collect::<Vec<Object>>(),
+            vec![object!("name" => "one", "blah" => "blah", "object-id" => 1)],
         );
 
         Ok(())
