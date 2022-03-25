@@ -230,7 +230,7 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 
 /// Automatically translate between properties of Qualia objects and fields of structs.
 ///
-/// A basic example:
+/// # Basic example
 ///
 /// ```
 /// # use qualia::{object, Object};
@@ -267,6 +267,8 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 /// );
 /// ```
 ///
+/// # Renaming properties
+///
 /// By default, properties get the same name as the field in the struct. This can be changed with
 /// the `object_field` attribute:
 ///
@@ -291,18 +293,33 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 ///     shape,
 ///     object!("my-name" => "letter", "width" => 8),
 /// );
+/// ```
 ///
-/// let obj: Object = object!(
-///     "my-name" => "letter",
-///     "width" => 8,
-/// );
+/// # Adding fixed properties
+///
+/// Additional fields with fixed values can be added with the `object_fixed_fields` attribute on
+/// the struct:
+///
+/// ```
+/// # use qualia::{object, Object};
+/// # use qualia_derive::ObjectShape;
+/// # use std::convert::{Infallible, TryFrom};
+/// #[derive(Debug, ObjectShape, PartialEq)]
+/// #[object_fixed_fields("kind" => "custom")]
+/// struct CustomShape {
+///     width: i64,
+///     height: i64,
+/// }
+///
+/// let shape: Object = CustomShape {
+///     width: 8,
+///     height: 11,
+/// }
+/// .into();
 ///
 /// assert_eq!(
-///     CustomShape::try_from(obj),
-///     Ok(CustomShape {
-///         name: "letter".to_string(),
-///         width: 8,
-///     })
+///     shape,
+///     object!("kind" => "custom", "width" => 8, "height" => 11),
 /// );
 /// ```
 #[proc_macro_derive(
@@ -357,11 +374,11 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
 
     let rest_field_try_from = if let Some(ref rest_field_ident) = rest_field_ident {
         quote!(
-            ,#rest_field_ident: object.iter().filter_map(|(k, v)| {
+            ,#rest_field_ident: object.into_iter().filter_map(|(k, v)| {
                 if (#(k == #field_names)||*) {
                     None
                 } else {
-                    Some((k.clone(), v.clone()))
+                    Some((k, v))
                 }
             }).collect()
         )
@@ -371,7 +388,7 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
 
     let rest_field_into = if let Some(ref rest_field_ident) = rest_field_ident {
         quote!(
-            result.extend(self.#rest_field_ident.iter().map(|(k, v)| (k.clone(), v.clone())));
+            result.extend(self.#rest_field_ident.into_iter());
         )
     } else {
         quote!()
