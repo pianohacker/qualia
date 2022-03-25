@@ -12,6 +12,10 @@ use crate::query::QueryNode;
 /// Convenience type for possibly returning a [`StoreError`].
 pub type Result<T, E = StoreError> = Result_<T, E>;
 
+/// External wrapper for checkpoint IDs.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct CheckpointId(i64);
+
 /// All errors that may be returned from a [`Store`].
 #[derive(Error, Debug)]
 pub enum StoreError {
@@ -313,6 +317,29 @@ impl Store {
 
         Ok(Some(description))
     }
+
+    /// Get the ID of the last checkpoint, if any.
+    pub fn last_checkpoint_id(&self) -> Result<CheckpointId> {
+        let checkpoint_id: i64 = self
+            .conn
+            .prepare(
+                "SELECT checkpoint_id
+                    FROM checkpoints
+                    ORDER BY checkpoint_id DESC
+                    LIMIT 1
+                ",
+            )?
+            .query_row(params![], |row| row.get(0))?;
+
+        return Ok(CheckpointId(checkpoint_id));
+    }
+
+    /// Check if the store has been changed since the given checkpoint.
+    pub fn modified_since(&self, a: CheckpointId) -> Result<bool> {
+        let b = self.last_checkpoint_id()?;
+
+        return Ok(a.0 < b.0);
+    }
 }
 
 /// A set of not-yet-committed changes to a [`Store`], as created by [`Store::checkpoint()`].
@@ -589,7 +616,9 @@ mod tests {
 
     #[test]
     fn new_store_is_empty() -> Result<()> {
-        assert_eq!(open_store(&test_dir(), "store.qualia").all().len()?, 0);
+        let store = open_store(&test_dir(), "store.qualia");
+        assert_eq!(store.all().len()?, 0);
+        assert!(store.last_checkpoint_id().is_err());
 
         Ok(())
     }
@@ -612,6 +641,25 @@ mod tests {
                 object!("name" => "two", "blah" => "halb", "object-id" => 2),
             ],
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn adding_objects_changes_checkpoint_id() -> Result<()> {
+        let (mut store, _test_dir) = populated_store()?;
+
+        let pre_checkpoint_id = store.last_checkpoint_id()?;
+        assert!(!store.modified_since(pre_checkpoint_id)?);
+
+        let checkpoint = store.checkpoint()?;
+        checkpoint.add(object!("name" => "b", "c" => "d"))?;
+        checkpoint.commit("add object")?;
+
+        let post_checkpoint_id = store.last_checkpoint_id()?;
+
+        assert_ne!(pre_checkpoint_id, post_checkpoint_id);
+        assert!(store.modified_since(pre_checkpoint_id)?);
 
         Ok(())
     }
