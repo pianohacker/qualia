@@ -30,5 +30,4 @@ tempfile = "3.1" # A library for managing a temporary directory and deleting all
 members = [
 	".",
 	"qualia_derive",
-	"qualia_cli",
 ]
