@@ -14,8 +14,8 @@ pub enum PropValue {
 /// A set of properties that may be stored in a [`Store`](crate::Store).
 pub type Object = HashMap<String, PropValue>;
 
-/// All errors that may be returned from a [`Store`].
-#[derive(Error, Debug)]
+/// All errors that may be returned from a [`Store`](crate::Store).
+#[derive(Error, Debug, PartialEq)]
 pub enum ConversionError {
     // Returned when a necessary field is missing.
     #[error("field {0} is missing")]

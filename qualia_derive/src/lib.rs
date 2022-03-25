@@ -1,3 +1,5 @@
+//! Derive macros for easily translating between objects in Qualia and Rust structs.
+
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -208,6 +210,49 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
         .collect())
 }
 
+/// Automatically translate between properties of Qualia objects and fields of structs.
+///
+/// A basic example:
+///
+/// ```
+/// # use qualia::{object, Object};
+/// # use qualia_derive::ObjectShape;
+/// # use std::convert::{Infallible, TryFrom};
+/// #[derive(Debug, ObjectShape, PartialEq)]
+/// struct CustomShape {
+///     #[object_field("my-name")]
+///     name: String,
+///     width: i64,
+///     height: i64,
+/// }
+///
+/// let shape: Object = CustomShape {
+///     name: "letter".to_string(),
+///     width: 8,
+///     height: 11,
+/// }
+/// .into();
+///
+/// assert_eq!(
+///     shape,
+///     object!("my-name" => "letter", "width" => 8, "height" => 11),
+/// );
+///
+/// let obj: Object = object!(
+///     "my-name" => "letter",
+///     "width" => 8,
+///     "height" => 11,
+/// );
+///
+/// assert_eq!(
+///     CustomShape::try_from(obj),
+///     Ok(CustomShape {
+///         name: "letter".to_string(),
+///         width: 8,
+///         height: 11,
+///     })
+/// );
+/// ```
 #[proc_macro_derive(ObjectShape, attributes(object_field, object_fixed_fields))]
 pub fn derive_object_shape(input: TokenStream) -> TokenStream {
     let parsed_struct = parse_macro_input!(input as DeriveInput);
