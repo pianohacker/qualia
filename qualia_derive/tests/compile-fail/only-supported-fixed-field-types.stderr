@@ -1,5 +1,5 @@
 error: expected integer literal or string literal
- --> $DIR/only-supported-fixed-field-types.rs:4:32
+ --> $DIR/only-supported-fixed-field-types.rs:5:32
   |
-4 | #[object_fixed_fields("foo" => 4.5)]
+5 | #[object_fixed_fields("foo" => 4.5)]
   |                                ^^^
