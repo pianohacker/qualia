@@ -98,6 +98,66 @@ fn can_convert_with_fixed_fields() -> Result<(), ConversionError> {
 }
 
 #[test]
+fn can_convert_with_rest_fields() -> Result<(), ConversionError> {
+    #[derive(Debug, ObjectShape, PartialEq)]
+    struct ShapeWithRest {
+        width: i64,
+        height: i64,
+        #[object_rest_fields]
+        rest: Object,
+    }
+
+    let shape: Object = ShapeWithRest {
+        width: 8,
+        height: 11,
+        rest: object!(),
+    }
+    .into();
+
+    assert_eq!(
+        shape,
+        object!(
+            "width" => 8,
+            "height" => 11,
+        ),
+    );
+
+    let shape2: Object = ShapeWithRest {
+        width: 8,
+        height: 11,
+        rest: object!("extra" => 1, "extra2" => 3),
+    }
+    .into();
+
+    assert_eq!(
+        shape2,
+        object!(
+            "width" => 8,
+            "height" => 11,
+            "extra" => 1,
+            "extra2" => 3,
+        ),
+    );
+
+    let obj: Object = object!(
+        "width" => 8,
+        "height" => 11,
+        "foo" => "bar",
+    );
+
+    assert_eq!(
+        ShapeWithRest::try_from(obj)?,
+        ShapeWithRest {
+            width: 8,
+            height: 11,
+            rest: object!("foo" => "bar"),
+        }
+    );
+
+    Ok(())
+}
+
+#[test]
 fn converting_with_fixed_fields_fails_when_invalid() -> Result<(), ConversionError> {
     #[derive(Debug, ObjectShape, PartialEq)]
     #[object_fixed_fields("foo" => 1, "type" => "shape")]

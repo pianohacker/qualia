@@ -42,6 +42,7 @@ fn parse_field_name(field: &syn::Field) -> syn::Result<String> {
     }
 }
 
+#[derive(Debug)]
 struct ParsedField {
     ident: proc_macro2::Ident,
     name: String,
@@ -86,41 +87,58 @@ fn string_accessor(field_name: &String) -> TokenStream2 {
     )
 }
 
-fn parse_fields(named_fields: &syn::FieldsNamed) -> syn::Result<Vec<ParsedField>> {
-    named_fields
-        .named
-        .iter()
-        .map(|field| {
-            let field_type = match &field.ty {
-                syn::Type::Path(p) => p,
-                _ => {
-                    return Err(syn::Error::new_spanned(
-                        &field.ty,
+fn parse_fields(
+    named_fields: &syn::FieldsNamed,
+) -> syn::Result<(Vec<ParsedField>, Option<syn::Ident>)> {
+    let mut rest_field_ident = None;
+
+    Ok((
+        named_fields
+            .named
+            .iter()
+            .map(|field| {
+                if let Some(_) = field.attrs.iter().find(|attr| {
+                    attr.style == syn::AttrStyle::Outer && attr.path.is_ident("object_rest_fields")
+                }) {
+                    rest_field_ident = Some(field.ident.clone().unwrap());
+                    return Ok(None);
+                }
+
+                let field_type = match &field.ty {
+                    syn::Type::Path(p) => p,
+                    _ => {
+                        return Err(syn::Error::new_spanned(
+                            &field.ty,
+                            "fields in ObjectShape must be i64 or String",
+                        ))
+                    }
+                };
+
+                let field_name = parse_field_name(&field)?;
+
+                let field_type_accessor = if field_type.path.is_ident("i64") {
+                    Ok(number_accessor(&field_name))
+                } else if field_type.path.is_ident("String") {
+                    Ok(string_accessor(&field_name))
+                } else {
+                    Err(syn::Error::new_spanned(
+                        &field_type.path,
                         "fields in ObjectShape must be i64 or String",
                     ))
-                }
-            };
+                }?;
 
-            let field_name = parse_field_name(&field)?;
-
-            let field_type_accessor = if field_type.path.is_ident("i64") {
-                Ok(number_accessor(&field_name))
-            } else if field_type.path.is_ident("String") {
-                Ok(string_accessor(&field_name))
-            } else {
-                Err(syn::Error::new_spanned(
-                    &field_type.path,
-                    "fields in ObjectShape must be i64 or String",
-                ))
-            }?;
-
-            Ok(ParsedField {
-                ident: field.ident.clone().unwrap(),
-                name: field_name,
-                accessor: field_type_accessor,
+                Ok(Some(ParsedField {
+                    ident: field.ident.clone().unwrap(),
+                    name: field_name,
+                    accessor: field_type_accessor,
+                }))
             })
-        })
-        .collect()
+            .collect::<syn::Result<Vec<_>>>()?
+            .into_iter()
+            .filter_map(|x| x)
+            .collect(),
+        rest_field_ident,
+    ))
 }
 
 #[derive(Debug)]
@@ -220,28 +238,24 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 /// # use std::convert::{Infallible, TryFrom};
 /// #[derive(Debug, ObjectShape, PartialEq)]
 /// struct CustomShape {
-///     #[object_field("my-name")]
 ///     name: String,
 ///     width: i64,
-///     height: i64,
 /// }
 ///
 /// let shape: Object = CustomShape {
 ///     name: "letter".to_string(),
 ///     width: 8,
-///     height: 11,
 /// }
 /// .into();
 ///
 /// assert_eq!(
 ///     shape,
-///     object!("my-name" => "letter", "width" => 8, "height" => 11),
+///     object!("name" => "letter", "width" => 8),
 /// );
 ///
 /// let obj: Object = object!(
-///     "my-name" => "letter",
+///     "name" => "letter",
 ///     "width" => 8,
-///     "height" => 11,
 /// );
 ///
 /// assert_eq!(
@@ -249,11 +263,52 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 ///     Ok(CustomShape {
 ///         name: "letter".to_string(),
 ///         width: 8,
-///         height: 11,
 ///     })
 /// );
 /// ```
-#[proc_macro_derive(ObjectShape, attributes(object_field, object_fixed_fields))]
+///
+/// By default, properties get the same name as the field in the struct. This can be changed with
+/// the `object_field` attribute:
+///
+/// ```
+/// # use qualia::{object, Object};
+/// # use qualia_derive::ObjectShape;
+/// # use std::convert::{Infallible, TryFrom};
+/// #[derive(Debug, ObjectShape, PartialEq)]
+/// struct CustomShape {
+///     #[object_field("my-name")]
+///     name: String,
+///     width: i64,
+/// }
+///
+/// let shape: Object = CustomShape {
+///     name: "letter".to_string(),
+///     width: 8,
+/// }
+/// .into();
+///
+/// assert_eq!(
+///     shape,
+///     object!("my-name" => "letter", "width" => 8),
+/// );
+///
+/// let obj: Object = object!(
+///     "my-name" => "letter",
+///     "width" => 8,
+/// );
+///
+/// assert_eq!(
+///     CustomShape::try_from(obj),
+///     Ok(CustomShape {
+///         name: "letter".to_string(),
+///         width: 8,
+///     })
+/// );
+/// ```
+#[proc_macro_derive(
+    ObjectShape,
+    attributes(object_field, object_fixed_fields, object_rest_fields)
+)]
 pub fn derive_object_shape(input: TokenStream) -> TokenStream {
     let parsed_struct = parse_macro_input!(input as DeriveInput);
     let orig_type_name = parsed_struct.ident;
@@ -288,7 +343,7 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
         "Can only derive ObjectType from a struct with named fields",
     );
 
-    let parsed_fields = try_or_error!(parse_fields(&named_fields));
+    let (parsed_fields, rest_field_ident) = try_or_error!(parse_fields(&named_fields));
 
     let mut field_names = Vec::new();
     let mut field_idents = Vec::new();
@@ -299,6 +354,28 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
         field_idents.push(f.ident);
         field_accessors.push(f.accessor);
     }
+
+    let rest_field_try_from = if let Some(ref rest_field_ident) = rest_field_ident {
+        quote!(
+            ,#rest_field_ident: object.iter().filter_map(|(k, v)| {
+                if (#(k == #field_names)||*) {
+                    None
+                } else {
+                    Some((k.clone(), v.clone()))
+                }
+            }).collect()
+        )
+    } else {
+        quote!()
+    };
+
+    let rest_field_into = if let Some(ref rest_field_ident) = rest_field_ident {
+        quote!(
+            result.extend(self.#rest_field_ident.iter().map(|(k, v)| (k.clone(), v.clone())));
+        )
+    } else {
+        quote!()
+    };
 
     quote!(
         impl std::convert::TryFrom<qualia::Object> for #orig_type_name {
@@ -323,6 +400,7 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
 
                 Ok(#orig_type_name {
                     #(#field_idents: object.#field_accessors),*
+                    #rest_field_try_from
                 })
             }
         }
@@ -331,10 +409,13 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
             fn into(self) -> qualia::Object {
                 use qualia::{object, Object};
 
-                object!(
+                let mut result = object!(
                     #(#fixed_field_names => #fixed_field_values),*
                     #(#field_names => self.#field_idents),*
-                )
+                );
+                #rest_field_into
+
+                result
             }
         }
 
