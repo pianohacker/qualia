@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
+use crate::query_builder::QueryBuilder;
+
 /// All possible types that can be stored inside an [`Object`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -34,6 +36,8 @@ pub enum ConversionError {
 pub trait ObjectShape:
     std::convert::TryFrom<Object, Error = ConversionError> + std::convert::Into<Object>
 {
+    /// Get a query builder that will return objects of this shape.
+    fn q() -> QueryBuilder;
 }
 
 /// Convenience macro for creating an [`Object`].

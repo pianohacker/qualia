@@ -322,6 +322,38 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 ///     object!("kind" => "custom", "width" => 8, "height" => 11),
 /// );
 /// ```
+///
+/// There is a helper method provided, [`q()`](`qualia::ObjectShape::q()`), which makes use of
+/// these fields. For example, for the above object shape, `CustomShape::q` returns a query for
+/// `"kind" = "custom"`.
+///
+/// # Accessing other properties
+///
+/// To set and fetch unlisted properties, an [`Object`](qualia::Object) field with the
+/// `object_rest_fields` attribute may be added.
+///
+/// ```
+/// # use qualia::{object, Object};
+/// # use qualia_derive::ObjectShape;
+/// # use std::convert::{Infallible, TryFrom};
+/// #[derive(Debug, ObjectShape, PartialEq)]
+/// struct CustomShape {
+///     width: i64,
+///     #[object_rest_fields]
+///     rest: Object,
+/// }
+///
+/// let shape: Object = CustomShape {
+///     width: 8,
+///     rest: object!("height" => "tall"),
+/// }
+/// .into();
+///
+/// assert_eq!(
+///     shape,
+///     object!("width" => 8, "height" => "tall"),
+/// );
+/// ```
 #[proc_macro_derive(
     ObjectShape,
     attributes(object_field, object_fixed_fields, object_rest_fields)
@@ -436,6 +468,16 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl qualia::ObjectShape for #orig_type_name {}
+        impl qualia::ObjectShape for #orig_type_name {
+            fn q() -> qualia::query_builder::QueryBuilder {
+                qualia::Q
+                #(
+                    .equal(
+                        #fixed_field_names,
+                        #fixed_field_values,
+                    )
+                )*
+            }
+        }
     ).into()
 }
