@@ -34,7 +34,7 @@ impl QueryBuilder {
     /// Add the criteria that the object have the given ID.
     pub fn id(self, value: impl Into<i64>) -> Self {
         self.add(PropEqual {
-            name: "object-id".into(),
+            name: "object_id".into(),
             value: value.into().into(),
         })
     }
@@ -104,10 +104,10 @@ mod tests {
                 },
             ),
             builder_test!(
-                "object-id equal",
+                "object_id equal",
                 Q.id(42).build(),
                 PropEqual {
-                    name: "object-id".to_string(),
+                    name: "object_id".to_string(),
                     value: 42.into(),
                 },
             ),

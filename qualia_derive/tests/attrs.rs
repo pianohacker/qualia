@@ -18,7 +18,7 @@ macro_rules! assert_is_err_matching {
 fn can_convert_with_custom_field_names() -> Result<(), ConversionError> {
     #[derive(Debug, ObjectShape, PartialEq)]
     struct CustomShape {
-        #[object_field("my-name")]
+        #[field("my-name")]
         name: String,
         width: i64,
         height: i64,
@@ -57,7 +57,7 @@ fn can_convert_with_custom_field_names() -> Result<(), ConversionError> {
 #[test]
 fn can_convert_with_fixed_fields() -> Result<(), ConversionError> {
     #[derive(Debug, ObjectShape, PartialEq)]
-    #[object_fixed_fields("foo" => 1, "type" => "shape")]
+    #[fixed_fields("foo" => 1, "type" => "shape")]
     struct ShapeWithType {
         width: i64,
         height: i64,
@@ -103,7 +103,7 @@ fn can_convert_with_rest_fields() -> Result<(), ConversionError> {
     struct ShapeWithRest {
         width: i64,
         height: i64,
-        #[object_rest_fields]
+        #[rest_fields]
         rest: Object,
     }
 
@@ -160,7 +160,7 @@ fn can_convert_with_rest_fields() -> Result<(), ConversionError> {
 #[test]
 fn converting_with_fixed_fields_fails_when_invalid() -> Result<(), ConversionError> {
     #[derive(Debug, ObjectShape, PartialEq)]
-    #[object_fixed_fields("foo" => 1, "type" => "shape")]
+    #[fixed_fields("foo" => 1, "type" => "shape")]
     struct ShapeWithType {
         width: i64,
         height: i64,
@@ -193,6 +193,54 @@ fn converting_with_fixed_fields_fails_when_invalid() -> Result<(), ConversionErr
             "height" => 11,
         )),
         "fixed.*foo.*1.*2",
+    );
+
+    Ok(())
+}
+
+#[test]
+fn can_get_related() -> Result<(), ConversionError> {
+    #[derive(Debug, ObjectShape, PartialEq)]
+    struct ShapeGroup {
+        #[field("my-name")]
+        name: String,
+        width: i64,
+        height: i64,
+    }
+
+    #[derive(Debug, ObjectShape, PartialEq)]
+    struct CustomShape {
+        #[field("my-name")]
+        name: String,
+        width: i64,
+        height: i64,
+    }
+
+    let shape: Object = CustomShape {
+        name: "letter".to_string(),
+        width: 8,
+        height: 11,
+    }
+    .into();
+
+    assert_eq!(
+        shape,
+        object!("my-name" => "letter", "width" => 8, "height" => 11),
+    );
+
+    let obj: Object = object!(
+        "my-name" => "letter",
+        "width" => 8,
+        "height" => 11,
+    );
+
+    assert_eq!(
+        CustomShape::try_from(obj)?,
+        CustomShape {
+            name: "letter".to_string(),
+            width: 8,
+            height: 11,
+        }
     );
 
     Ok(())

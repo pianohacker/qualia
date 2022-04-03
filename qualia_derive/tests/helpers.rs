@@ -3,7 +3,7 @@ use qualia::{object, ConversionError, ObjectShape, Result, Q};
 #[test]
 fn returns_query_helper() -> Result<(), ConversionError> {
     #[derive(ObjectShape)]
-    #[object_fixed_fields("a" => 1, "b" => "c")]
+    #[fixed_fields("a" => 1, "b" => "c")]
     struct QueriedShape {
         width: i64,
     }

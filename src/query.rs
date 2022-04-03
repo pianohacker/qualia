@@ -65,7 +65,7 @@ impl QueryNode {
     }
 
     fn equal_to_sql_clause(name: &String, value: &PropValue) -> (String, Vec<Box<dyn ToSql>>) {
-        if name == "object-id" {
+        if name == "object_id" {
             return ("object_id = ?".to_string(), vec_params![value.clone()]);
         }
 
@@ -167,9 +167,9 @@ mod tests {
                 [42],
             ),
             query_test!(
-                "object-id equal",
+                "object_id equal",
                 PropEqual {
-                    name: "object-id".to_string(),
+                    name: "object_id".to_string(),
                     value: 42.into(),
                 },
                 "object_id = ?",

@@ -30,6 +30,9 @@ pub enum StoreError {
 
     #[error("invalid usage: {0}")]
     Usage(String),
+
+    #[error("did not find one item, found {0}")]
+    NotOne(usize),
 }
 
 trait AsStoreResult<T> {
@@ -495,12 +498,26 @@ impl<'a> Collection<'a> {
                         let mut object =
                             serde_json::from_str::<Object>(&serialized_object).as_store_result()?;
 
-                        object.insert("object-id".to_string(), PropValue::Number(object_id));
+                        object.insert("object_id".to_string(), PropValue::Number(object_id));
                         Ok(object)
                     })
             })
             .collect::<Result<Vec<Object>>>()?
             .into_iter())
+    }
+
+    /// Get one and only one object from the collection.
+    ///
+    /// Will error if more than one object is returned.
+    pub fn one(&self) -> Result<Object> {
+        let mut results = self.iter()?;
+        let len = self.len()?;
+
+        if len > 1 {
+            return Err(StoreError::NotOne(len));
+        }
+
+        results.next().ok_or_else(|| StoreError::NotOne(0))
     }
 
     /// Iterate over all objects in the collection, converting them to the given shape.
@@ -512,6 +529,20 @@ impl<'a> Collection<'a> {
             .map(|object| object.try_into().as_store_result())
             .collect::<Result<Vec<T>>>()?
             .into_iter())
+    }
+
+    /// Get one and only one object from the collection, converting it to the given shape.
+    ///
+    /// Will error if more than one object is returned.
+    pub fn one_as<T: ObjectShape + 'a>(&self) -> Result<T> {
+        let mut results = self.iter_as()?;
+        let len = self.len()?;
+
+        if len > 1 {
+            return Err(StoreError::NotOne(len));
+        }
+
+        results.next().ok_or_else(|| StoreError::NotOne(0))
     }
 }
 
@@ -532,7 +563,7 @@ impl<'a> MutableCollection<'a> {
         for object in self.iter()? {
             self.checkpoint.record_change(
                 ChangeType::Delete,
-                object["object-id"].as_number().unwrap(),
+                object["object_id"].as_number().unwrap(),
                 serde_json::to_string(&object)?,
             )?;
         }
@@ -552,7 +583,7 @@ impl<'a> MutableCollection<'a> {
         for object in self.iter()? {
             self.checkpoint.record_change(
                 ChangeType::Update,
-                object["object-id"].as_number().unwrap(),
+                object["object_id"].as_number().unwrap(),
                 serde_json::to_string(&object)?,
             )?;
         }
@@ -635,12 +666,27 @@ mod tests {
         assert_eq!(
             all_objects,
             vec![
-                object!("name" => "four", "blah" => "blahblah", "object-id" => 4),
-                object!("name" => "one", "blah" => "blah", "object-id" => 1),
-                object!("name" => "three", "blah" => "BLAH", "object-id" => 3),
-                object!("name" => "two", "blah" => "halb", "object-id" => 2),
+                object!("name" => "four", "blah" => "blahblah", "object_id" => 4),
+                object!("name" => "one", "blah" => "blah", "object_id" => 1),
+                object!("name" => "three", "blah" => "BLAH", "object_id" => 3),
+                object!("name" => "two", "blah" => "halb", "object_id" => 2),
             ],
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn added_objects_can_be_retrieved_one_by_one() -> Result<()> {
+        let (store, _test_dir) = populated_store()?;
+
+        assert_eq!(
+            store.query(Q.id(1)).one()?,
+            object!("name" => "one", "blah" => "blah", "object_id" => 1),
+        );
+
+        assert!(store.query(Q.id(5)).one().is_err());
+        assert!(store.query(Q.like("name", "blah")).one().is_err());
 
         Ok(())
     }
@@ -695,6 +741,19 @@ mod tests {
             ],
         );
 
+        assert_eq!(
+            store.query(Q.id(1)).one_as::<Blah>()?,
+            Blah {
+                name: "one".to_string()
+            },
+        );
+
+        assert!(store.query(Q.id(5)).one_as::<Blah>().is_err());
+        assert!(store
+            .query(Q.like("name", "blah"))
+            .one_as::<Blah>()
+            .is_err());
+
         Ok(())
     }
 
@@ -731,7 +790,7 @@ mod tests {
         sort_objects(&mut found_objects);
         assert_eq!(
             found_objects,
-            vec![object!("name" => "one", "blah" => "blah", "object-id" => 1)],
+            vec![object!("name" => "one", "blah" => "blah", "object_id" => 1)],
         );
 
         Ok(())
@@ -798,7 +857,7 @@ mod tests {
         sort_objects(&mut found_objects);
         assert_eq!(
             found_objects,
-            vec![object!("name" => "b", "c" => "d", "object-id" => object_id)],
+            vec![object!("name" => "b", "c" => "d", "object_id" => object_id)],
         );
 
         Ok(())
@@ -816,8 +875,8 @@ mod tests {
         assert_eq!(
             found_objects,
             vec![
-                object!("name" => "one", "blah" => "blah", "object-id" => 1),
-                object!("name" => "three", "blah" => "BLAH", "object-id" => 3)
+                object!("name" => "one", "blah" => "blah", "object_id" => 1),
+                object!("name" => "three", "blah" => "BLAH", "object_id" => 3)
             ],
         );
 
@@ -835,7 +894,7 @@ mod tests {
         sort_objects(&mut found_objects);
         assert_eq!(
             found_objects,
-            vec![object!("name" => "one", "blah" => "blah", "object-id" => 1),],
+            vec![object!("name" => "one", "blah" => "blah", "object_id" => 1),],
         );
 
         Ok(())
@@ -851,7 +910,7 @@ mod tests {
 
         assert_eq!(
             store.query(Q.id(1)).iter()?.collect::<Vec<Object>>(),
-            vec![object!("name" => "wun", "blah" => "blah", "object-id" => 1)],
+            vec![object!("name" => "wun", "blah" => "blah", "object_id" => 1)],
         );
 
         Ok(())
@@ -869,7 +928,7 @@ mod tests {
 
         assert_eq!(
             store.query(Q.id(1)).iter()?.collect::<Vec<Object>>(),
-            vec![object!("name" => "one", "blah" => "blah", "object-id" => 1)],
+            vec![object!("name" => "one", "blah" => "blah", "object_id" => 1)],
         );
 
         Ok(())

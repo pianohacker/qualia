@@ -34,7 +34,7 @@ fn parse_field_name(field: &syn::Field) -> syn::Result<String> {
     if let Some(attr) = field
         .attrs
         .iter()
-        .find(|attr| attr.style == syn::AttrStyle::Outer && attr.path.is_ident("object_field"))
+        .find(|attr| attr.style == syn::AttrStyle::Outer && attr.path.is_ident("field"))
     {
         attr.parse_args::<syn::LitStr>().map(|lit| lit.value())
     } else {
@@ -98,7 +98,7 @@ fn parse_fields(
             .iter()
             .map(|field| {
                 if let Some(_) = field.attrs.iter().find(|attr| {
-                    attr.style == syn::AttrStyle::Outer && attr.path.is_ident("object_rest_fields")
+                    attr.style == syn::AttrStyle::Outer && attr.path.is_ident("rest_fields")
                 }) {
                     rest_field_ident = Some(field.ident.clone().unwrap());
                     return Ok(None);
@@ -209,9 +209,10 @@ impl syn::parse::Parse for FixedFields {
 }
 
 fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField>> {
-    let attr = match attrs.iter().find(|attr| {
-        attr.style == syn::AttrStyle::Outer && attr.path.is_ident("object_fixed_fields")
-    }) {
+    let attr = match attrs
+        .iter()
+        .find(|attr| attr.style == syn::AttrStyle::Outer && attr.path.is_ident("fixed_fields"))
+    {
         Some(a) => a,
         None => return Ok(Vec::new()),
     };
@@ -270,7 +271,7 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 /// # Renaming properties
 ///
 /// By default, properties get the same name as the field in the struct. This can be changed with
-/// the `object_field` attribute:
+/// the `field` attribute:
 ///
 /// ```
 /// # use qualia::{object, Object};
@@ -278,7 +279,7 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 /// # use std::convert::{Infallible, TryFrom};
 /// #[derive(Debug, ObjectShape, PartialEq)]
 /// struct CustomShape {
-///     #[object_field("my-name")]
+///     #[field("my-name")]
 ///     name: String,
 ///     width: i64,
 /// }
@@ -297,7 +298,7 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 ///
 /// # Adding fixed properties
 ///
-/// Additional fields with fixed values can be added with the `object_fixed_fields` attribute on
+/// Additional fields with fixed values can be added with the `fixed_fields` attribute on
 /// the struct:
 ///
 /// ```
@@ -305,7 +306,7 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 /// # use qualia_derive::ObjectShape;
 /// # use std::convert::{Infallible, TryFrom};
 /// #[derive(Debug, ObjectShape, PartialEq)]
-/// #[object_fixed_fields("kind" => "custom")]
+/// #[fixed_fields("kind" => "custom")]
 /// struct CustomShape {
 ///     width: i64,
 ///     height: i64,
@@ -330,7 +331,7 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 /// # Accessing other properties
 ///
 /// To set and fetch unlisted properties, an [`Object`](qualia::Object) field with the
-/// `object_rest_fields` attribute may be added.
+/// `rest_fields` attribute may be added.
 ///
 /// ```
 /// # use qualia::{object, Object};
@@ -339,7 +340,7 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 /// #[derive(Debug, ObjectShape, PartialEq)]
 /// struct CustomShape {
 ///     width: i64,
-///     #[object_rest_fields]
+///     #[rest_fields]
 ///     rest: Object,
 /// }
 ///
@@ -354,10 +355,33 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 ///     object!("width" => 8, "height" => "tall"),
 /// );
 /// ```
-#[proc_macro_derive(
-    ObjectShape,
-    attributes(object_field, object_fixed_fields, object_rest_fields)
-)]
+///
+/// # Accessing related objects
+///
+/// Often, objects contain references to other object's ID fields. If those objects have a defined
+/// `ObjectShape`, then helper methods to fetch them can be generated with the `related`
+/// attribute:
+///
+/// ```
+/// # use qualia::{object, Object};
+/// # use qualia_derive::ObjectShape;
+/// # use std::convert::{Infallible, TryFrom};
+/// #[derive(Debug, ObjectShape, PartialEq)]
+/// struct ShapeGroup {
+///     name: String,
+/// }
+///
+/// #[derive(Debug, ObjectShape, PartialEq)]
+/// struct CustomShape {
+///     #[related(ShapeGroup)]
+///     shape_group_id: i64,
+///     width: i64,
+/// }
+///
+/// // if let Some(group) = custom_shape.shape_group(&store)? {;
+/// //     ...
+/// ```
+#[proc_macro_derive(ObjectShape, attributes(field, fixed_fields, rest_fields, related))]
 pub fn derive_object_shape(input: TokenStream) -> TokenStream {
     let parsed_struct = parse_macro_input!(input as DeriveInput);
     let orig_type_name = parsed_struct.ident;
