@@ -15,4 +15,10 @@ struct Foo2<'a> {
     c: String,
 }
 
+#[derive(ObjectShape)]
+struct Foo3 {
+    object_id: i64,
+    a: String,
+}
+
 fn main() {}

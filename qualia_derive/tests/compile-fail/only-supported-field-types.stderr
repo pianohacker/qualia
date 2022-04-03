@@ -4,8 +4,14 @@ error: fields in ObjectShape must be i64 or String
 7 |     b: f64,
   |        ^^^
 
-error: fields in ObjectShape must be i64 or String
+error: fields in ObjectShape must be simple types (usually i64 or String)
   --> $DIR/only-supported-field-types.rs:14:8
    |
 14 |     b: &'a str,
    |        ^^^^^^^
+
+error: object_id field of OptionShape must be Option<i64>
+  --> $DIR/only-supported-field-types.rs:20:16
+   |
+20 |     object_id: i64,
+   |                ^^^

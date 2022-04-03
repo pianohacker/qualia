@@ -47,6 +47,7 @@ struct ParsedField {
     ident: proc_macro2::Ident,
     name: String,
     accessor: TokenStream2,
+    inserter: TokenStream2,
 }
 
 fn base_accessor(field_name: &String) -> TokenStream2 {
@@ -87,6 +88,22 @@ fn string_accessor(field_name: &String) -> TokenStream2 {
     )
 }
 
+fn object_id_accessor() -> TokenStream2 {
+    quote!(get("object_id")
+        .map(
+            |f| f.as_number().ok_or(qualia::ConversionError::FieldWrongType(
+                "object_id".to_string(),
+                "number".to_string(),
+            ),)
+        )
+        .transpose()?)
+}
+
+#[allow(unused)]
+fn option_i64_path() -> syn::TypePath {
+    syn::parse_str("Option<i64>").unwrap()
+}
+
 fn parse_fields(
     named_fields: &syn::FieldsNamed,
 ) -> syn::Result<(Vec<ParsedField>, Option<syn::Ident>)> {
@@ -104,19 +121,27 @@ fn parse_fields(
                     return Ok(None);
                 }
 
-                let field_type = match &field.ty {
-                    syn::Type::Path(p) => p,
-                    _ => {
-                        return Err(syn::Error::new_spanned(
+                let field_type =
+                    match &field.ty {
+                        syn::Type::Path(p) => p,
+                        _ => return Err(syn::Error::new_spanned(
                             &field.ty,
-                            "fields in ObjectShape must be i64 or String",
-                        ))
-                    }
-                };
+                            "fields in ObjectShape must be simple types (usually i64 or String)",
+                        )),
+                    };
 
                 let field_name = parse_field_name(&field)?;
 
-                let field_type_accessor = if field_type.path.is_ident("i64") {
+                let field_type_accessor = if field_name == "object_id" {
+                    if *field_type == option_i64_path() {
+                        Ok(object_id_accessor())
+                    } else {
+                        Err(syn::Error::new_spanned(
+                            &field_type.path,
+                            "object_id field of OptionShape must be Option<i64>",
+                        ))
+                    }
+                } else if field_type.path.is_ident("i64") {
                     Ok(number_accessor(&field_name))
                 } else if field_type.path.is_ident("String") {
                     Ok(string_accessor(&field_name))
@@ -127,10 +152,22 @@ fn parse_fields(
                     ))
                 }?;
 
+                let field_ident = field.ident.clone().unwrap();
+                let field_inserter = if field_name == "object_id" {
+                    quote!(
+                        if let Some(object_id) = self.#field_ident {
+                            result.insert("object_id".into(), object_id.into());
+                        }
+                    )
+                } else {
+                    quote!(result.insert(#field_name.into(), self.#field_ident.into());)
+                };
+
                 Ok(Some(ParsedField {
-                    ident: field.ident.clone().unwrap(),
+                    ident: field_ident,
                     name: field_name,
                     accessor: field_type_accessor,
+                    inserter: field_inserter,
                 }))
             })
             .collect::<syn::Result<Vec<_>>>()?
@@ -356,18 +393,48 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 /// );
 /// ```
 ///
+/// # Getting ID of inserted object
+///
+/// The ID of the object can be retrieved from an `Option<i64>` field named `object_id`:
+///
+/// ```
+/// # use qualia::{object, Object};
+/// # use qualia_derive::ObjectShape;
+/// # use std::convert::{Infallible, TryFrom, TryInto};
+/// #[derive(Debug, ObjectShape, PartialEq)]
+/// struct CustomShape {
+///     object_id: Option<i64>,
+///     width: i64,
+/// }
+///
+/// let shape: CustomShape = object!(
+///     "object_id" => 42,
+///     "width" => 65,
+/// ).try_into().unwrap();
+///
+/// assert_eq!(
+///     shape,
+///     CustomShape { object_id: Some(42), width: 65 },
+/// );
+///
+/// // let shape2 = CustomShape { object_id: None, width: 11 };
+/// // store.insert_with_id(&mut shape2)?;
+/// // assert!(shape2.object_id.is_some());
+/// ```
+///
 /// # Accessing related objects
 ///
 /// Often, objects contain references to other object's ID fields. If those objects have a defined
 /// `ObjectShape`, then helper methods to fetch them can be generated with the `related`
 /// attribute:
 ///
-/// ```
+/// ```ignore
 /// # use qualia::{object, Object};
 /// # use qualia_derive::ObjectShape;
 /// # use std::convert::{Infallible, TryFrom};
 /// #[derive(Debug, ObjectShape, PartialEq)]
 /// struct ShapeGroup {
+///     object_id: Option<i64>,
 ///     name: String,
 /// }
 ///
@@ -421,11 +488,13 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
     let mut field_names = Vec::new();
     let mut field_idents = Vec::new();
     let mut field_accessors = Vec::new();
+    let mut field_inserters = Vec::new();
 
     for f in parsed_fields.into_iter() {
         field_names.push(f.name);
         field_idents.push(f.ident);
         field_accessors.push(f.accessor);
+        field_inserters.push(f.inserter);
     }
 
     let rest_field_try_from = if let Some(ref rest_field_ident) = rest_field_ident {
@@ -482,10 +551,11 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
             fn into(self) -> qualia::Object {
                 use qualia::{object, Object};
 
+                #[allow(unused_mut)]
                 let mut result = object!(
                     #(#fixed_field_names => #fixed_field_values),*
-                    #(#field_names => self.#field_idents),*
                 );
+                #(#field_inserters)*
                 #rest_field_into
 
                 result
