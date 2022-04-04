@@ -1,4 +1,4 @@
-use qualia::{object, ConversionError, ObjectShape, Result, Q};
+use qualia::{object, ConversionError, ObjectShape, ObjectShapeWithId, Result, Q};
 
 #[test]
 fn returns_query_helper() -> Result<(), ConversionError> {
@@ -11,6 +11,24 @@ fn returns_query_helper() -> Result<(), ConversionError> {
     assert_eq!(
         QueriedShape::q().build(),
         Q.equal("a", 1).equal("b", "c").build()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn can_get_and_set_id() -> Result<(), ConversionError> {
+    #[derive(ObjectShape)]
+    struct IdShape {
+        object_id: Option<i64>,
+    }
+
+    assert_eq!(
+        IdShape {
+            object_id: Some(49)
+        }
+        .get_object_id(),
+        Some(49)
     );
 
     Ok(())

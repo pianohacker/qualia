@@ -485,6 +485,25 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
 
     let (parsed_fields, rest_field_ident) = try_or_error!(parse_fields(&named_fields));
 
+    let object_shape_with_id_impl =
+        if let Some(field) = parsed_fields.iter().find(|f| f.name == "object_id") {
+            let field_ident = field.ident.clone();
+
+            quote!(
+                impl qualia::ObjectShapeWithId for #orig_type_name {
+                    fn get_object_id(&self) -> Option<i64> {
+                        self.#field_ident
+                    }
+
+                    fn set_object_id(&mut self, object_id: i64) {
+                        self.#field_ident = Some(object_id);
+                    }
+                }
+            )
+        } else {
+            quote!()
+        };
+
     let mut field_names = Vec::new();
     let mut field_idents = Vec::new();
     let mut field_accessors = Vec::new();
@@ -573,5 +592,7 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
                 )*
             }
         }
+
+        #object_shape_with_id_impl
     ).into()
 }

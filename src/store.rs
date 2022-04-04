@@ -415,6 +415,20 @@ impl<'a> Checkpoint<'a> {
         Ok(object_id as i64)
     }
 
+    /// Add an object to the store.
+    ///
+    /// Stores the ID inside the created object.
+    pub fn add_with_id<O>(&self, object: &mut O) -> Result<()>
+    where
+        O: Clone + ObjectShapeWithId + Into<Object>,
+    {
+        let object_id = self.add(object.clone().into())?;
+
+        object.set_object_id(object_id);
+
+        Ok(())
+    }
+
     /// Get a [`MutableCollection`] of the objects matching the given query.
     ///
     /// This can take either a [`QueryNode`] or [`QueryBuilder`](crate::query_builder::QueryBuilder); you almost certainly want to use
@@ -753,6 +767,39 @@ mod tests {
             .query(Q.like("name", "blah"))
             .one_as::<Blah>()
             .is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn objects_can_be_inserted_from_a_shape() -> Result<()> {
+        let (mut store, _test_dir) = populated_store()?;
+
+        use crate as qualia;
+        #[derive(Clone, Debug, ObjectShape, PartialEq)]
+        struct ShapeWithId {
+            object_id: Option<i64>,
+            name: String,
+        }
+
+        let mut obj = ShapeWithId {
+            object_id: None,
+            name: "yo".to_string(),
+        };
+        let checkpoint = store.checkpoint()?;
+        checkpoint.add_with_id(&mut obj)?;
+        checkpoint.commit("add undoable object")?;
+
+        assert!(obj.object_id.is_some());
+        let object_id = obj.get_object_id().unwrap();
+
+        assert_eq!(
+            store.query(Q.id(object_id)).one_as::<ShapeWithId>()?,
+            ShapeWithId {
+                object_id: Some(object_id),
+                name: "yo".to_string()
+            },
+        );
 
         Ok(())
     }

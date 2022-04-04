@@ -40,6 +40,15 @@ pub trait ObjectShape:
     fn q() -> QueryBuilder;
 }
 
+/// A type that can be converted to and from an object, with its `object_id`.
+pub trait ObjectShapeWithId: ObjectShape {
+    /// Get the object's ID.
+    fn get_object_id(&self) -> Option<i64>;
+
+    /// Set the object's ID.
+    fn set_object_id(&mut self, object_id: i64);
+}
+
 /// Convenience macro for creating an [`Object`].
 #[macro_export]
 macro_rules! object {
