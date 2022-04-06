@@ -11,7 +11,7 @@ authors = ["Jesse Weaver <pianohacker@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-qualia_derive = { path = "./qualia_derive", version = "^0.11"}
+qualia_derive = { path = "./qualia_derive", version = "^0.12"}
 rusqlite = { version = "0.24", features = ["functions"] } # Ergonomic wrapper for SQLite
 thiserror = "1.0" # derive(Error)
 serde = { version = "1.0", features = ["derive"] } # A generic serialization/deserialization framework
