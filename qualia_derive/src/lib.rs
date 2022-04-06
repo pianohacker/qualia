@@ -1,9 +1,10 @@
 //! Derive macros for easily translating between objects in Qualia and Rust structs.
 
 extern crate proc_macro;
+use convert_case::{Case, Casing};
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{quote, quote_spanned, ToTokens};
+use quote::{format_ident, quote, quote_spanned, ToTokens};
 use syn::{parse_macro_input, DeriveInput};
 
 macro_rules! error_stream {
@@ -48,6 +49,7 @@ struct ParsedField {
     name: String,
     accessor: TokenStream2,
     inserter: TokenStream2,
+    related_impl: Option<TokenStream2>,
 }
 
 fn base_accessor(field_name: &String) -> TokenStream2 {
@@ -102,6 +104,33 @@ fn object_id_accessor() -> TokenStream2 {
 #[allow(unused)]
 fn option_i64_path() -> syn::TypePath {
     syn::parse_str("Option<i64>").unwrap()
+}
+
+fn related_impl(field: &syn::Field) -> syn::Result<Option<TokenStream2>> {
+    if let Some(attr) = field
+        .attrs
+        .iter()
+        .find(|attr| attr.style == syn::AttrStyle::Outer && attr.path.is_ident("related"))
+    {
+        let typ = attr.parse_args::<syn::TypePath>()?;
+        let field_ident = field.ident.clone();
+        let helper_base = field
+            .ident
+            .clone()
+            .unwrap()
+            .to_string()
+            .to_case(Case::Snake)
+            .replace("_id", "");
+        let fetch_name = format_ident!("fetch_{}", helper_base);
+
+        Ok(Some(quote!(
+            fn #fetch_name(&self, store: &qualia::Store) -> qualia::Result<#typ> where #typ: qualia::ObjectShapeWithId {
+                store.query(<#typ as qualia::ObjectShape>::q().id(self.#field_ident)).one_as()
+            }
+        )))
+    } else {
+        Ok(None)
+    }
 }
 
 fn parse_fields(
@@ -168,6 +197,7 @@ fn parse_fields(
                     name: field_name,
                     accessor: field_type_accessor,
                     inserter: field_inserter,
+                    related_impl: related_impl(&field)?,
                 }))
             })
             .collect::<syn::Result<Vec<_>>>()?
@@ -428,7 +458,7 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 /// `ObjectShape`, then helper methods to fetch them can be generated with the `related`
 /// attribute:
 ///
-/// ```ignore
+/// ```
 /// # use qualia::{object, Object};
 /// # use qualia_derive::ObjectShape;
 /// # use std::convert::{Infallible, TryFrom};
@@ -445,7 +475,7 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 ///     width: i64,
 /// }
 ///
-/// // if let Some(group) = custom_shape.shape_group(&store)? {;
+/// // if let Some(group) = custom_shape.fetch_shape_group(&store)? {;
 /// //     ...
 /// ```
 #[proc_macro_derive(ObjectShape, attributes(field, fixed_fields, rest_fields, related))]
@@ -508,12 +538,17 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
     let mut field_idents = Vec::new();
     let mut field_accessors = Vec::new();
     let mut field_inserters = Vec::new();
+    let mut field_related_impls = Vec::new();
 
     for f in parsed_fields.into_iter() {
         field_names.push(f.name);
         field_idents.push(f.ident);
         field_accessors.push(f.accessor);
         field_inserters.push(f.inserter);
+
+        if let Some(related_impl) = f.related_impl {
+            field_related_impls.push(related_impl);
+        }
     }
 
     let rest_field_try_from = if let Some(ref rest_field_ident) = rest_field_ident {
@@ -594,5 +629,9 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
         }
 
         #object_shape_with_id_impl
+
+        impl #orig_type_name {
+            #(#field_related_impls)*
+        }
     ).into()
 }

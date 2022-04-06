@@ -1,0 +1,8 @@
+error[E0277]: the trait bound `Foo: ObjectShapeWithId` is not satisfied
+ --> $DIR/only-related-to-shapes-with-id.rs:7:10
+  |
+7 | #[derive(ObjectShape)]
+  |          ^^^^^^^^^^^ the trait `ObjectShapeWithId` is not implemented for `Foo`
+  |
+  = help: see issue #48214
+  = note: this error originates in the derive macro `ObjectShape` (in Nightly builds, run with -Z macro-backtrace for more info)

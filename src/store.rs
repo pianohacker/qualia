@@ -844,6 +844,42 @@ mod tests {
     }
 
     #[test]
+    fn related_objects_can_be_found() -> Result<()> {
+        let (mut store, _test_dir) = populated_store()?;
+
+        use crate as qualia;
+        #[derive(Clone, Debug, ObjectShape, PartialEq)]
+        struct ParentShape {
+            object_id: Option<i64>,
+        }
+
+        #[derive(Clone, Debug, ObjectShape, PartialEq)]
+        struct ShapeWithRelated {
+            #[related(ParentShape)]
+            parent_shape_id: i64,
+        }
+
+        let mut parent_shape = ParentShape { object_id: None };
+        let checkpoint = store.checkpoint()?;
+        checkpoint.add_with_id(&mut parent_shape)?;
+
+        let shape_with_related = ShapeWithRelated {
+            parent_shape_id: parent_shape.object_id.unwrap(),
+        };
+        checkpoint.add(shape_with_related.clone().into())?;
+        checkpoint.commit("add related object")?;
+
+        assert_eq!(
+            shape_with_related.fetch_parent_shape(&store)?,
+            ParentShape {
+                object_id: parent_shape.object_id,
+            },
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn objects_can_be_deleted() -> Result<()> {
         let (mut store, _test_dir) = populated_store()?;
 
