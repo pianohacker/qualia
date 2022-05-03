@@ -1,5 +1,5 @@
 use regex::Regex;
-use rusqlite::{params, Connection};
+use rusqlite::{params, params_from_iter, Connection};
 use std::convert::TryInto;
 use std::path::Path;
 use std::result::Result as Result_;
@@ -9,12 +9,10 @@ use thiserror::Error;
 use crate::object::*;
 use crate::query::QueryNode;
 
+type CheckpointId = i64;
+
 /// Convenience type for possibly returning a [`StoreError`].
 pub type Result<T, E = StoreError> = Result_<T, E>;
-
-/// External wrapper for checkpoint IDs.
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct CheckpointId(i64);
 
 /// All errors that may be returned from a [`Store`].
 #[derive(Error, Debug)]
@@ -202,6 +200,13 @@ impl Store {
         }
     }
 
+    /// Get a [`CachedCollection`] of the objects matching the given query.
+    ///
+    /// Objects will be fetched ahead of time.
+    pub fn cached_query(&self, query: impl Into<QueryNode>) -> Result<CachedCollection> {
+        CachedCollection::new(self, query.into())
+    }
+
     /// Start a [`Checkpoint`] on the store. All modifications must be done through a checkpoint.
     ///
     /// This method takes a mutable reference to ensure that only one checkpoint can be active at a given time.
@@ -334,14 +339,14 @@ impl Store {
             )?
             .query_row(params![], |row| row.get(0))?;
 
-        return Ok(CheckpointId(checkpoint_id));
+        return Ok(checkpoint_id);
     }
 
     /// Check if the store has been changed since the given checkpoint.
     pub fn modified_since(&self, a: CheckpointId) -> Result<bool> {
         let b = self.last_checkpoint_id()?;
 
-        return Ok(a.0 < b.0);
+        return Ok(a < b);
     }
 }
 
@@ -486,7 +491,8 @@ impl<'a> Collection<'a> {
         Ok(statement
             // This workaround can be removed when https://github.com/rusqlite/rusqlite/issues/700
             // is closed
-            .query_row(params, |row| row.get::<usize, i64>(0))? as usize)
+            .query_row(params_from_iter(params), |row| row.get::<usize, i64>(0))?
+            as usize)
     }
 
     /// Returns true if there are any objects in the collection.
@@ -501,7 +507,7 @@ impl<'a> Collection<'a> {
         let (mut statement, params) =
             self.prepare_with_query("SELECT object_id, properties FROM objects")?;
 
-        let rows = statement.query_and_then(params, |row| {
+        let rows = statement.query_and_then(params_from_iter(params), |row| {
             Ok((row.get::<usize, i64>(0)?, row.get::<usize, String>(1)?))
         })?;
 
@@ -560,6 +566,66 @@ impl<'a> Collection<'a> {
     }
 }
 
+/// A set of objects matching a given query, as returned by [`Store::cached_query()`].
+///
+/// Objects are fetched ahead of time. To check if the cache is still valid, use
+/// [`CachedCollection::valid()`].
+pub struct CachedCollection {
+    fetched_at_checkpoint: CheckpointId,
+    query: QueryNode,
+    objects: Vec<Object>,
+}
+
+impl CachedCollection {
+    fn new(store: &Store, query: QueryNode) -> Result<CachedCollection> {
+        Ok(CachedCollection {
+            fetched_at_checkpoint: store.last_checkpoint_id()?,
+            query: query.clone(),
+            objects: store.query(query).iter()?.collect(),
+        })
+    }
+
+    pub fn refresh_if_needed(&mut self, store: &Store) -> Result<()> {
+        let fetched_at_checkpoint = store.last_checkpoint_id()?;
+
+        if fetched_at_checkpoint > self.fetched_at_checkpoint {
+            self.fetched_at_checkpoint = fetched_at_checkpoint;
+            self.objects = store.query(self.query.clone()).iter()?.collect();
+        }
+
+        Ok(())
+    }
+
+    pub fn valid(&self, store: &Store) -> Result<bool> {
+        Ok(!store.modified_since(self.fetched_at_checkpoint)?)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Object> {
+        self.objects.iter()
+    }
+
+    pub fn iter_as<
+        'a,
+        T: ObjectShape + std::convert::TryFrom<&'a Object, Error = ConversionError>,
+    >(
+        &'a self,
+    ) -> Result<impl Iterator<Item = T>> {
+        Ok(self
+            .iter()
+            .map(|object| object.try_into().as_store_result())
+            .collect::<Result<Vec<T>>>()?
+            .into_iter())
+    }
+
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+
+    pub fn exists(&self) -> bool {
+        self.objects.len() > 0
+    }
+}
+
 /// A reference to a modifiable set of objects matching a given query, as returned by
 /// [`Checkpoint::query()`].
 ///
@@ -583,7 +649,9 @@ impl<'a> MutableCollection<'a> {
         }
 
         let (mut statement, params) = self.prepare_with_query("DELETE FROM objects")?;
-        statement.execute(params).as_store_result()
+        statement
+            .execute(params_from_iter(params))
+            .as_store_result()
     }
 
     /// Set the given fields on objects in the collection.
@@ -609,7 +677,9 @@ impl<'a> MutableCollection<'a> {
 
         params.insert(0, Box::new(fields_serialized) as Box<dyn rusqlite::ToSql>);
 
-        statement.execute(params).as_store_result()
+        statement
+            .execute(params_from_iter(params))
+            .as_store_result()
     }
 }
 
@@ -663,7 +733,6 @@ mod tests {
     fn new_store_is_empty() -> Result<()> {
         let store = open_store(&test_dir(), "store.qualia");
         assert_eq!(store.all().len()?, 0);
-        assert!(store.last_checkpoint_id().is_err());
 
         Ok(())
     }
@@ -701,25 +770,6 @@ mod tests {
 
         assert!(store.query(Q.id(5)).one().is_err());
         assert!(store.query(Q.like("name", "blah")).one().is_err());
-
-        Ok(())
-    }
-
-    #[test]
-    fn adding_objects_changes_checkpoint_id() -> Result<()> {
-        let (mut store, _test_dir) = populated_store()?;
-
-        let pre_checkpoint_id = store.last_checkpoint_id()?;
-        assert!(!store.modified_since(pre_checkpoint_id)?);
-
-        let checkpoint = store.checkpoint()?;
-        checkpoint.add(object!("name" => "b", "c" => "d"))?;
-        checkpoint.commit("add object")?;
-
-        let post_checkpoint_id = store.last_checkpoint_id()?;
-
-        assert_ne!(pre_checkpoint_id, post_checkpoint_id);
-        assert!(store.modified_since(pre_checkpoint_id)?);
 
         Ok(())
     }
@@ -875,6 +925,91 @@ mod tests {
                 object_id: parent_shape.object_id,
             },
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn can_cache_queries() -> Result<()> {
+        use crate as qualia;
+        #[derive(Debug, ObjectShape, PartialEq)]
+        struct Blah {
+            name: String,
+        }
+
+        let (mut store, _test_dir) = populated_store()?;
+
+        let mut cached_query = store.cached_query(Q.equal("blah", "blah"))?;
+
+        assert_eq!(
+            cached_query.iter().collect::<Vec<_>>(),
+            vec![&object!("name" => "one", "blah" => "blah", "object_id" => 1)]
+        );
+        assert_eq!(
+            cached_query.iter_as()?.collect::<Vec<Blah>>(),
+            vec![Blah {
+                name: "one".to_string()
+            }],
+        );
+        assert_eq!(cached_query.len(), 1);
+        assert_eq!(cached_query.valid(&store)?, true);
+
+        let checkpoint = store.checkpoint()?;
+        checkpoint.add(object!("name" => "five", "blah" => "blah"))?;
+        checkpoint.commit("add new object")?;
+
+        assert_eq!(
+            store
+                .query(Q.equal("blah", "blah"))
+                .iter()?
+                .collect::<Vec<_>>(),
+            vec![
+                object!("name" => "one", "blah" => "blah", "object_id" => 1),
+                object!("name" => "five", "blah" => "blah", "object_id" => 5),
+            ]
+        );
+        assert_eq!(cached_query.len(), 1);
+        assert_eq!(
+            cached_query.iter().collect::<Vec<_>>(),
+            vec![&object!("name" => "one", "blah" => "blah", "object_id" => 1)]
+        );
+        assert_eq!(cached_query.valid(&store)?, false);
+
+        cached_query.refresh_if_needed(&store)?;
+        assert_eq!(
+            cached_query.iter().collect::<Vec<_>>(),
+            vec![
+                &object!("name" => "one", "blah" => "blah", "object_id" => 1),
+                &object!("name" => "five", "blah" => "blah", "object_id" => 5),
+            ]
+        );
+        assert_eq!(
+            cached_query.iter_as()?.collect::<Vec<Blah>>(),
+            vec![
+                Blah {
+                    name: "one".to_string()
+                },
+                Blah {
+                    name: "five".to_string()
+                }
+            ],
+        );
+        assert_eq!(cached_query.len(), 2);
+        assert_eq!(cached_query.valid(&store)?, true);
+
+        let mut cached_existence_query = store.cached_query(Q.equal("name", "six"))?;
+        assert_eq!(cached_existence_query.exists(), false);
+
+        let checkpoint = store.checkpoint()?;
+        checkpoint.add(object!("name" => "six"))?;
+        checkpoint.commit("add six object")?;
+
+        assert_eq!(cached_existence_query.exists(), false);
+        assert_eq!(cached_existence_query.len(), 0);
+
+        cached_existence_query.refresh_if_needed(&store)?;
+        assert_eq!(cached_existence_query.exists(), true);
+        assert_eq!(cached_existence_query.len(), 1);
 
         Ok(())
     }

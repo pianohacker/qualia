@@ -8,20 +8,15 @@ documentation = "https://docs.rs/qualia"
 
 license = "MPL-2.0"
 authors = ["Jesse Weaver <pianohacker@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 qualia_derive = { path = "./qualia_derive", version = "^0.12"}
-rusqlite = { version = "0.24", features = ["functions"] } # Ergonomic wrapper for SQLite
+rusqlite = { version = "0.27", features = ["functions"] } # Ergonomic wrapper for SQLite
 thiserror = "1.0" # derive(Error)
 serde = { version = "1.0", features = ["derive"] } # A generic serialization/deserialization framework
 serde_json = "1.0" # A JSON serialization file format
 regex = "1.4" # An implementation of regular expressions for Rust. This implementation uses finite automata and gua…
-
-# TODO: I have _no idea_ why this has to be here. It seems like
-# https://github.com/rust-lang/cargo/issues/4463#issuecomment-737391509 implies we sholdn't have to
-# do this...
-syn = { version = "1.0", features = ["extra-traits", "full"] }
 
 [dev-dependencies]
 tempfile = "3.1" # A library for managing a temporary directory and deleting all contents when it's dropped.

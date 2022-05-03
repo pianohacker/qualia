@@ -601,6 +601,34 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
             }
         }
 
+        impl std::convert::TryFrom<&qualia::Object> for #orig_type_name {
+            type Error = qualia::ConversionError;
+
+            fn try_from(orig_object: &qualia::Object) -> std::result::Result<#orig_type_name, qualia::ConversionError> {
+                let object = orig_object.clone();
+                #(
+                    {
+                        let value = object.#fixed_field_accessors;
+
+                        if value != #fixed_field_values {
+                            return Err(
+                                qualia::ConversionError::FixedFieldWrongValue(
+                                    #fixed_field_names.to_string(),
+                                    #fixed_field_values.into(),
+                                    value.into(),
+                                )
+                            );
+                        }
+                    }
+                )*
+
+                Ok(#orig_type_name {
+                    #(#field_idents: object.#field_accessors),*
+                    #rest_field_try_from
+                })
+            }
+        }
+
         impl std::convert::Into<qualia::Object> for #orig_type_name {
             fn into(self) -> qualia::Object {
                 use qualia::{object, Object};

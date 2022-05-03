@@ -6,7 +6,7 @@ use crate::object::PropValue;
 ///
 /// For all but advanced cases, [`QueryBuilder`](crate::query_builder::QueryBuilder) should be used
 /// (via [`Q`](crate::query_builder::Q)) rather than creating QueryNode objects directly.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum QueryNode {
     /// Will match all objects.
     Empty,

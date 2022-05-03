@@ -34,6 +34,15 @@ fn can_convert_from_object() -> Result<(), ConversionError> {
         }
     );
 
+    assert_eq!(
+        Shape::try_from(&object!("name" => "letter", "width" => 8, "height" => 11))?,
+        Shape {
+            name: "letter".to_string(),
+            width: 8,
+            height: 11
+        }
+    );
+
     Ok(())
 }
 
