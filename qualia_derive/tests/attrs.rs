@@ -161,13 +161,13 @@ fn can_convert_with_rest_fields() -> Result<(), ConversionError> {
 fn converting_with_fixed_fields_fails_when_invalid() -> Result<(), ConversionError> {
     #[derive(Debug, ObjectShape, PartialEq)]
     #[fixed_fields("foo" => 1, "type" => "shape")]
-    struct ShapeWithType {
+    struct ShapeWithTypeInvalid {
         width: i64,
         height: i64,
     }
 
     assert_is_err_matching!(
-        ShapeWithType::try_from(object!(
+        ShapeWithTypeInvalid::try_from(object!(
             "type" => "shape",
             "width" => 8,
             "height" => 11,
@@ -176,7 +176,7 @@ fn converting_with_fixed_fields_fails_when_invalid() -> Result<(), ConversionErr
     );
 
     assert_is_err_matching!(
-        ShapeWithType::try_from(object!(
+        ShapeWithTypeInvalid::try_from(object!(
             "type" => "shape",
             "foo" => "blah"
             "width" => 8,
@@ -186,7 +186,7 @@ fn converting_with_fixed_fields_fails_when_invalid() -> Result<(), ConversionErr
     );
 
     assert_is_err_matching!(
-        ShapeWithType::try_from(object!(
+        ShapeWithTypeInvalid::try_from(object!(
             "type" => "shape",
             "foo" => 2,
             "width" => 8,

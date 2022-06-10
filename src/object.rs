@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
-use crate::query_builder::QueryBuilder;
+use crate::{query_builder::QueryBuilder, Store, StoreError};
 
 /// All possible types that can be stored inside an [`Object`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -32,12 +32,25 @@ pub enum ConversionError {
     FixedFieldWrongValue(String, PropValue, PropValue),
 }
 
-/// A type that can be converted to and from an object.
-pub trait ObjectShape:
-    std::convert::TryFrom<Object, Error = ConversionError> + std::convert::Into<Object>
-{
+pub trait Queryable {
     /// Get a query builder that will return objects of this shape.
     fn q() -> QueryBuilder;
+}
+
+/// A type that can be converted to and from an object.
+pub trait ObjectShape: Queryable + std::convert::Into<Object> {
+    /// Try to convert the given object into this shape, retrieving any referenced objects from the
+    /// given store.
+    fn try_convert(object: Object, store: &Store) -> Result<Self, StoreError>;
+}
+
+/// A type that can be converted to and from an object without needing a store.
+///
+/// Object shapes that derive `ObjectShape` will implement this if there are no referenced object
+/// fields.
+pub trait ObjectShapePlain:
+    ObjectShape + std::convert::TryFrom<Object, Error = ConversionError>
+{
 }
 
 /// A type that can be converted to and from an object, with its `object_id`.

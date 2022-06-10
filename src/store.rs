@@ -543,7 +543,7 @@ impl<'a> Collection<'a> {
     /// Iterate over all objects in the collection, converting them to the given shape.
     ///
     /// This prefetches all objects in the collection so that errors can be reported early.
-    pub fn iter_as<T: ObjectShape + 'a>(&self) -> Result<impl Iterator<Item = T> + 'a> {
+    pub fn iter_as<T: ObjectShapePlain + 'a>(&self) -> Result<impl Iterator<Item = T> + 'a> {
         Ok(self
             .iter()?
             .map(|object| object.try_into().as_store_result())
@@ -554,8 +554,36 @@ impl<'a> Collection<'a> {
     /// Get one and only one object from the collection, converting it to the given shape.
     ///
     /// Will error if more than one object is returned.
-    pub fn one_as<T: ObjectShape + 'a>(&self) -> Result<T> {
+    pub fn one_as<T: ObjectShapePlain + 'a>(&self) -> Result<T> {
         let mut results = self.iter_as()?;
+        let len = self.len()?;
+
+        if len > 1 {
+            return Err(StoreError::NotOne(len));
+        }
+
+        results.next().ok_or_else(|| StoreError::NotOne(0))
+    }
+
+    /// Iterate over all objects in the collection, converting them to the given shape.
+    ///
+    /// This prefetches all objects in the collection so that errors can be reported early.
+    pub fn iter_converted<T: ObjectShape + 'a>(
+        &self,
+        store: &Store,
+    ) -> Result<impl Iterator<Item = T> + 'a> {
+        Ok(self
+            .iter()?
+            .map(|object| T::try_convert(object, store).as_store_result())
+            .collect::<Result<Vec<T>>>()?
+            .into_iter())
+    }
+
+    /// Get one and only one object from the collection, converting it to the given shape.
+    ///
+    /// Will error if more than one object is returned.
+    pub fn one_converted<T: ObjectShape + 'a>(&self, store: &Store) -> Result<T> {
+        let mut results = self.iter_converted(&store)?;
         let len = self.len()?;
 
         if len > 1 {
@@ -894,7 +922,7 @@ mod tests {
     }
 
     #[test]
-    fn related_objects_can_be_found() -> Result<()> {
+    fn referenced_objects_can_be_found() -> Result<()> {
         let (mut store, _test_dir) = populated_store()?;
 
         use crate as qualia;
@@ -904,25 +932,29 @@ mod tests {
         }
 
         #[derive(Clone, Debug, ObjectShape, PartialEq)]
-        struct ShapeWithRelated {
-            #[related(ParentShape)]
-            parent_shape_id: i64,
+        struct ShapeWithReferenced {
+            object_id: Option<i64>,
+            parent_shape: ParentShape,
         }
 
         let mut parent_shape = ParentShape { object_id: None };
         let checkpoint = store.checkpoint()?;
         checkpoint.add_with_id(&mut parent_shape)?;
 
-        let shape_with_related = ShapeWithRelated {
-            parent_shape_id: parent_shape.object_id.unwrap(),
+        let mut shape_with_related = ShapeWithReferenced {
+            object_id: None,
+            parent_shape,
         };
-        checkpoint.add(shape_with_related.clone().into())?;
+        checkpoint.add_with_id(&mut shape_with_related)?;
         checkpoint.commit("add related object")?;
 
         assert_eq!(
-            shape_with_related.fetch_parent_shape(&store)?,
+            store
+                .query(Q.id(shape_with_related.get_object_id().unwrap()))
+                .one_converted::<ShapeWithReferenced>(&store)?
+                .parent_shape,
             ParentShape {
-                object_id: parent_shape.object_id,
+                object_id: shape_with_related.parent_shape.object_id,
             },
         );
 

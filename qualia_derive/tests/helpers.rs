@@ -1,4 +1,4 @@
-use qualia::{object, ConversionError, ObjectShape, ObjectShapeWithId, Result, Q};
+use qualia::{object, ConversionError, ObjectShape, ObjectShapeWithId, Queryable, Result, Q};
 
 #[test]
 fn returns_query_helper() -> Result<(), ConversionError> {

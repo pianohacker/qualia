@@ -44,17 +44,19 @@ fn parse_field_name(field: &syn::Field) -> syn::Result<String> {
 }
 
 #[derive(Debug)]
-struct ParsedField {
+struct DerivedField {
     ident: proc_macro2::Ident,
     name: String,
-    accessor: TokenStream2,
+    accessor: Option<TokenStream2>,
+    converter: TokenStream2,
     inserter: TokenStream2,
     related_impl: Option<TokenStream2>,
 }
 
 fn base_accessor(field_name: &String) -> TokenStream2 {
     quote!(
-        get(#field_name)
+        object
+        .get(#field_name)
         .ok_or(qualia::ConversionError::FieldMissing(#field_name.to_string()))?
     )
 }
@@ -91,7 +93,8 @@ fn string_accessor(field_name: &String) -> TokenStream2 {
 }
 
 fn object_id_accessor() -> TokenStream2 {
-    quote!(get("object_id")
+    quote!(object
+        .get("object_id")
         .map(
             |f| f.as_number().ok_or(qualia::ConversionError::FieldWrongType(
                 "object_id".to_string(),
@@ -106,31 +109,18 @@ fn option_i64_path() -> syn::TypePath {
     syn::parse_str("Option<i64>").unwrap()
 }
 
-fn related_impl(field: &syn::Field) -> syn::Result<Option<TokenStream2>> {
-    if let Some(attr) = field
-        .attrs
-        .iter()
-        .find(|attr| attr.style == syn::AttrStyle::Outer && attr.path.is_ident("related"))
-    {
-        let typ = attr.parse_args::<syn::TypePath>()?;
-        let field_ident = field.ident.clone();
-        let helper_base = field
-            .ident
-            .clone()
-            .unwrap()
-            .to_string()
-            .to_case(Case::Snake)
-            .replace("_id", "");
-        let fetch_name = format_ident!("fetch_{}", helper_base);
+enum FieldKind {
+    Number,
+    String,
+    Object(syn::TypePath),
+    ObjectId,
+}
 
-        Ok(Some(quote!(
-            fn #fetch_name(&self, store: &qualia::Store) -> qualia::Result<#typ> where #typ: qualia::ObjectShapeWithId {
-                store.query(<#typ as qualia::ObjectShape>::q().id(self.#field_ident)).one_as()
-            }
-        )))
-    } else {
-        Ok(None)
-    }
+struct ParsedField {
+    ident: proc_macro2::Ident,
+    name: String,
+    kind: FieldKind,
+    related_type: Option<syn::TypePath>,
 }
 
 fn parse_fields(
@@ -159,45 +149,38 @@ fn parse_fields(
                         )),
                     };
 
+                let field_ident = field.ident.clone().unwrap();
                 let field_name = parse_field_name(&field)?;
 
-                let field_type_accessor = if field_name == "object_id" {
-                    if *field_type == option_i64_path() {
-                        Ok(object_id_accessor())
-                    } else {
-                        Err(syn::Error::new_spanned(
-                            &field_type.path,
-                            "object_id field of OptionShape must be Option<i64>",
-                        ))
-                    }
-                } else if field_type.path.is_ident("i64") {
-                    Ok(number_accessor(&field_name))
-                } else if field_type.path.is_ident("String") {
-                    Ok(string_accessor(&field_name))
-                } else {
-                    Err(syn::Error::new_spanned(
-                        &field_type.path,
-                        "fields in ObjectShape must be i64 or String",
-                    ))
-                }?;
-
-                let field_ident = field.ident.clone().unwrap();
-                let field_inserter = if field_name == "object_id" {
-                    quote!(
-                        if let Some(object_id) = self.#field_ident {
-                            result.insert("object_id".into(), object_id.into());
-                        }
-                    )
-                } else {
-                    quote!(result.insert(#field_name.into(), self.#field_ident.into());)
-                };
+                let related_type = field
+                    .attrs
+                    .iter()
+                    .find(|attr| {
+                        attr.style == syn::AttrStyle::Outer && attr.path.is_ident("related")
+                    })
+                    .map(|attr| attr.parse_args::<syn::TypePath>())
+                    .transpose()?;
 
                 Ok(Some(ParsedField {
+                    name: field_name.clone(),
                     ident: field_ident,
-                    name: field_name,
-                    accessor: field_type_accessor,
-                    inserter: field_inserter,
-                    related_impl: related_impl(&field)?,
+                    kind: if field_name == "object_id" {
+                        if *field_type == option_i64_path() {
+                            FieldKind::ObjectId
+                        } else {
+                            return Err(syn::Error::new_spanned(
+                                &field_type.path,
+                                "object_id field of OptionShape must be Option<i64>",
+                            ));
+                        }
+                    } else if field_type.path.is_ident("i64") {
+                        FieldKind::Number
+                    } else if field_type.path.is_ident("String") {
+                        FieldKind::String
+                    } else {
+                        FieldKind::Object(field_type.clone())
+                    },
+                    related_type,
                 }))
             })
             .collect::<syn::Result<Vec<_>>>()?
@@ -206,6 +189,123 @@ fn parse_fields(
             .collect(),
         rest_field_ident,
     ))
+}
+
+fn derive_fields(
+    orig_type_name: &syn::Ident,
+    named_fields: &syn::FieldsNamed,
+) -> syn::Result<(Vec<DerivedField>, TokenStream2, Option<syn::Ident>)> {
+    let (parsed_fields, rest_field_ident) = parse_fields(named_fields)?;
+    let mut assertions = Vec::new();
+
+    let mut prologue = Vec::new();
+
+    if let Some(field) = parsed_fields.iter().find(|f| f.name == "object_id") {
+        let field_ident = field.ident.clone();
+
+        prologue.push(quote!(
+            impl qualia::ObjectShapeWithId for #orig_type_name {
+                fn get_object_id(&self) -> Option<i64> {
+                    self.#field_ident
+                }
+
+                fn set_object_id(&mut self, object_id: i64) {
+                    self.#field_ident = Some(object_id);
+                }
+            }
+        ));
+    }
+
+    let derived_fields = parsed_fields
+        .iter()
+        .map(|field| {
+            let field_type_converter = match field.kind {
+                FieldKind::ObjectId => object_id_accessor(),
+                FieldKind::Number => number_accessor(&field.name),
+                FieldKind::String => string_accessor(&field.name),
+                FieldKind::Object(ref ty) => {
+                    assertions.push(quote! {
+                        || {
+                            fn assert_impl<T: qualia::ObjectShapeWithId>() {}
+                            assert_impl::<#ty>();
+                        };
+                    });
+
+                    let id_field_name = format!("{}_id", field.name);
+                    let id_accessor = number_accessor(&id_field_name);
+
+                    quote! {
+                        {
+                            let id = #id_accessor;
+                            store.query(#ty::q()).one_as()?
+                        }
+                    }
+                }
+            };
+
+            let field_type_accessor = match field.kind {
+                FieldKind::ObjectId | FieldKind::Number | FieldKind::String => {
+                    Some(field_type_converter.clone())
+                }
+                FieldKind::Object(_) => None,
+            };
+
+            let field_name = field.name.clone();
+            let field_ident = field.ident.clone();
+            let field_inserter = match field.kind {
+                FieldKind::ObjectId => quote! {
+                    if let Some(object_id) = self.#field_ident {
+                        result.insert("object_id".into(), object_id.into());
+                    }
+                },
+                FieldKind::Number | FieldKind::String => quote! {
+                    result.insert(#field_name.into(), self.#field_ident.into());
+                },
+                FieldKind::Object(_) => quote! {
+                    result.insert(
+                        #field_name.into(),
+                        self.#field_ident.get_object_id().unwrap().into(),
+                    );
+                },
+            };
+
+            let related_impl = field.related_type.as_ref().map(|related_type| {
+        let field_ident = field.ident.clone();
+        let helper_base = field
+            .ident
+            .clone()
+            .to_string()
+            .to_case(Case::Snake)
+            .replace("_id", "");
+        let fetch_name = format_ident!("fetch_{}", helper_base);
+
+        quote!(
+            fn #fetch_name(&self, store: &qualia::Store) -> qualia::Result<#related_type> where #related_type: qualia::ObjectShapeWithId {
+                store.query(<#related_type as qualia::Queryable>::q().id(self.#field_ident)).one_as()
+            }
+        )
+            });
+
+            Ok(DerivedField {
+                ident: field_ident,
+                name: field_name,
+                accessor: field_type_accessor,
+                converter: field_type_converter,
+                inserter: field_inserter,
+                related_impl,
+            })
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+
+    if assertions.len() > 0 {
+        prologue.push(quote! {
+            const _: () = {
+                #(#assertions)*
+            };
+        });
+    }
+
+    Ok((derived_fields, quote!(#(#prologue)*), rest_field_ident))
 }
 
 #[derive(Debug)]
@@ -478,7 +578,10 @@ fn parse_fixed_fields(attrs: &Vec<syn::Attribute>) -> syn::Result<Vec<FixedField
 /// // if let Some(group) = custom_shape.fetch_shape_group(&store)? {;
 /// //     ...
 /// ```
-#[proc_macro_derive(ObjectShape, attributes(field, fixed_fields, rest_fields, related))]
+#[proc_macro_derive(
+    ObjectShape,
+    attributes(field, fixed_fields, rest_fields, related, referenced)
+)]
 pub fn derive_object_shape(input: TokenStream) -> TokenStream {
     let parsed_struct = parse_macro_input!(input as DeriveInput);
     let orig_type_name = parsed_struct.ident;
@@ -513,38 +616,28 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
         "Can only derive ObjectType from a struct with named fields",
     );
 
-    let (parsed_fields, rest_field_ident) = try_or_error!(parse_fields(&named_fields));
-
-    let object_shape_with_id_impl =
-        if let Some(field) = parsed_fields.iter().find(|f| f.name == "object_id") {
-            let field_ident = field.ident.clone();
-
-            quote!(
-                impl qualia::ObjectShapeWithId for #orig_type_name {
-                    fn get_object_id(&self) -> Option<i64> {
-                        self.#field_ident
-                    }
-
-                    fn set_object_id(&mut self, object_id: i64) {
-                        self.#field_ident = Some(object_id);
-                    }
-                }
-            )
-        } else {
-            quote!()
-        };
+    let (derived_fields, prologue, rest_field_ident) =
+        try_or_error!(derive_fields(&orig_type_name, &named_fields));
 
     let mut field_names = Vec::new();
     let mut field_idents = Vec::new();
     let mut field_accessors = Vec::new();
     let mut field_inserters = Vec::new();
+    let mut field_converters = Vec::new();
     let mut field_related_impls = Vec::new();
+    let mut has_full_accessor_impl = true;
 
-    for f in parsed_fields.into_iter() {
+    for f in derived_fields.into_iter() {
         field_names.push(f.name);
         field_idents.push(f.ident);
-        field_accessors.push(f.accessor);
+        field_converters.push(f.converter);
         field_inserters.push(f.inserter);
+
+        if let Some(field_accessor) = f.accessor {
+            field_accessors.push(field_accessor);
+        } else {
+            has_full_accessor_impl = false;
+        }
 
         if let Some(related_impl) = f.related_impl {
             field_related_impls.push(related_impl);
@@ -573,42 +666,59 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
         quote!()
     };
 
-    quote!(
-        impl std::convert::TryFrom<qualia::Object> for #orig_type_name {
-            type Error = qualia::ConversionError;
+    let try_from_impl = if has_full_accessor_impl {
+        quote! {
+            impl std::convert::TryFrom<qualia::Object> for #orig_type_name {
+                type Error = qualia::ConversionError;
 
-            fn try_from(object: qualia::Object) -> std::result::Result<#orig_type_name, qualia::ConversionError> {
-                #(
-                    {
-                        let value = object.#fixed_field_accessors;
+                fn try_from(object: qualia::Object) -> std::result::Result<#orig_type_name, qualia::ConversionError> {
+                    #(
+                        {
+                            let value = #fixed_field_accessors;
 
-                        if value != #fixed_field_values {
-                            return Err(
-                                qualia::ConversionError::FixedFieldWrongValue(
-                                    #fixed_field_names.to_string(),
-                                    #fixed_field_values.into(),
-                                    value.into(),
-                                )
-                            );
+                            if value != #fixed_field_values {
+                                return Err(
+                                    qualia::ConversionError::FixedFieldWrongValue(
+                                        #fixed_field_names.to_string(),
+                                        #fixed_field_values.into(),
+                                        value.into(),
+                                    )
+                                );
+                            }
                         }
-                    }
-                )*
+                    )*
 
-                Ok(#orig_type_name {
-                    #(#field_idents: object.#field_accessors),*
-                    #rest_field_try_from
-                })
+                    Ok(#orig_type_name {
+                        #(#field_idents: #field_accessors),*
+                        #rest_field_try_from
+                    })
+                }
             }
+
+            impl std::convert::TryFrom<&qualia::Object> for #orig_type_name {
+                type Error = qualia::ConversionError;
+
+                fn try_from(orig_object: &qualia::Object) -> std::result::Result<#orig_type_name, qualia::ConversionError> {
+                    #orig_type_name::try_from(orig_object.clone())
+                }
+            }
+
+            impl qualia::ObjectShapePlain for #orig_type_name {}
         }
+    } else {
+        quote!()
+    };
 
-        impl std::convert::TryFrom<&qualia::Object> for #orig_type_name {
-            type Error = qualia::ConversionError;
+    let result = quote!(
+        #prologue
 
-            fn try_from(orig_object: &qualia::Object) -> std::result::Result<#orig_type_name, qualia::ConversionError> {
-                let object = orig_object.clone();
+        #try_from_impl
+
+        impl qualia::ObjectShape for #orig_type_name {
+            fn try_convert(object: qualia::Object, store: &qualia::Store) -> std::result::Result<#orig_type_name, qualia::StoreError> {
                 #(
                     {
-                        let value = object.#fixed_field_accessors;
+                        let value = #fixed_field_accessors;
 
                         if value != #fixed_field_values {
                             return Err(
@@ -616,14 +726,14 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
                                     #fixed_field_names.to_string(),
                                     #fixed_field_values.into(),
                                     value.into(),
-                                )
+                                ).into()
                             );
                         }
                     }
                 )*
 
                 Ok(#orig_type_name {
-                    #(#field_idents: object.#field_accessors),*
+                    #(#field_idents: #field_converters),*
                     #rest_field_try_from
                 })
             }
@@ -644,7 +754,7 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl qualia::ObjectShape for #orig_type_name {
+        impl qualia::Queryable for #orig_type_name {
             fn q() -> qualia::query_builder::QueryBuilder {
                 qualia::Q
                 #(
@@ -656,10 +766,12 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
             }
         }
 
-        #object_shape_with_id_impl
-
         impl #orig_type_name {
             #(#field_related_impls)*
         }
-    ).into()
+    ).into();
+    eprintln!("");
+    eprintln!("{}", result);
+    eprintln!("");
+    result
 }
