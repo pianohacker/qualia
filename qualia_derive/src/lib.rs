@@ -237,7 +237,7 @@ fn derive_fields(
                     quote! {
                         {
                             let id = #id_accessor;
-                            store.query(#ty::q()).one_as()?
+                            store.query(#ty::q().id(id)).one_as()?
                         }
                     }
                 }
@@ -261,11 +261,14 @@ fn derive_fields(
                 FieldKind::Number | FieldKind::String => quote! {
                     result.insert(#field_name.into(), self.#field_ident.into());
                 },
-                FieldKind::Object(_) => quote! {
-                    result.insert(
-                        #field_name.into(),
-                        self.#field_ident.get_object_id().unwrap().into(),
-                    );
+                FieldKind::Object(_) => {
+                    let id_field_name = format!("{}_id", field.name);
+                    quote! {
+                        result.insert(
+                            #id_field_name.into(),
+                            self.#field_ident.get_object_id().unwrap().into(),
+                        );
+                    }
                 },
             };
 
@@ -299,6 +302,7 @@ fn derive_fields(
 
     if assertions.len() > 0 {
         prologue.push(quote! {
+            #[allow(unused_must_use)]
             const _: () = {
                 #(#assertions)*
             };

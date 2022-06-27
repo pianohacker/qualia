@@ -948,6 +948,11 @@ mod tests {
         checkpoint.add_with_id(&mut shape_with_related)?;
         checkpoint.commit("add related object")?;
 
+        dbg!(store
+            .query(Q.id(shape_with_related.get_object_id().unwrap()))
+            .iter_converted::<ShapeWithReferenced>(&store)?
+            .collect::<Vec<_>>(),);
+
         assert_eq!(
             store
                 .query(Q.id(shape_with_related.get_object_id().unwrap()))
