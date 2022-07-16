@@ -774,8 +774,8 @@ pub fn derive_object_shape(input: TokenStream) -> TokenStream {
             #(#field_related_impls)*
         }
     ).into();
-    eprintln!("");
-    eprintln!("{}", result);
-    eprintln!("");
+    // eprintln!("");
+    // eprintln!("{}", result);
+    // eprintln!("");
     result
 }
