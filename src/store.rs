@@ -9,7 +9,7 @@ use thiserror::Error;
 use crate::object::*;
 use crate::query::QueryNode;
 
-type CheckpointId = i64;
+pub type CheckpointId = i64;
 
 /// Convenience type for possibly returning a [`StoreError`].
 pub type Result<T, E = StoreError> = Result_<T, E>;
@@ -200,11 +200,15 @@ impl Store {
         }
     }
 
-    /// Get a [`CachedCollection`] of the objects matching the given query.
+    /// Get a [`CachedMapping`] of the objects matching the given query.
     ///
     /// Objects will be fetched ahead of time.
-    pub fn cached_query(&self, query: impl Into<QueryNode>) -> Result<CachedCollection> {
-        CachedCollection::new(self, query.into())
+    pub fn cached_map<F: FnMut(Object, &Store) -> Result<O>, O>(
+        &self,
+        query: impl Into<QueryNode>,
+        f: F,
+    ) -> Result<CachedMapping<F, O>> {
+        CachedMapping::new(self, query.into(), f)
     }
 
     /// Start a [`Checkpoint`] on the store. All modifications must be done through a checkpoint.
@@ -594,31 +598,47 @@ impl<'a> Collection<'a> {
     }
 }
 
-/// A set of objects matching a given query, as returned by [`Store::cached_query()`].
+/// A set of results of querying a given query and mapping the results, as returned by [`Store::cached_query()`].
 ///
 /// Objects are fetched ahead of time. To check if the cache is still valid, use
-/// [`CachedCollection::valid()`].
-pub struct CachedCollection {
+/// [`CachedMapping::valid()`].
+pub struct CachedMapping<F, O> {
     fetched_at_checkpoint: CheckpointId,
     query: QueryNode,
-    objects: Vec<Object>,
+    objects: Vec<O>,
+    f: F,
 }
 
-impl CachedCollection {
-    fn new(store: &Store, query: QueryNode) -> Result<CachedCollection> {
-        Ok(CachedCollection {
+impl<F, O> CachedMapping<F, O>
+where
+    F: FnMut(Object, &Store) -> Result<O>,
+{
+    fn new(store: &Store, query: QueryNode, f: F) -> Result<CachedMapping<F, O>> {
+        let mut result = CachedMapping {
             fetched_at_checkpoint: store.last_checkpoint_id()?,
             query: query.clone(),
-            objects: store.query(query).iter()?.collect(),
-        })
+            objects: vec![],
+            f,
+        };
+        result.refresh(&store)?;
+
+        Ok(result)
+    }
+
+    fn refresh(&mut self, store: &Store) -> Result<()> {
+        self.objects = store
+            .query(self.query.clone())
+            .iter()?
+            .map(|obj| (self.f)(obj, &store))
+            .collect::<Result<Vec<O>>>()?;
+
+        Ok(())
     }
 
     pub fn refresh_if_needed(&mut self, store: &Store) -> Result<()> {
-        let fetched_at_checkpoint = store.last_checkpoint_id()?;
-
-        if fetched_at_checkpoint > self.fetched_at_checkpoint {
-            self.fetched_at_checkpoint = fetched_at_checkpoint;
-            self.objects = store.query(self.query.clone()).iter()?.collect();
+        if !self.valid(&store)? {
+            self.fetched_at_checkpoint = store.last_checkpoint_id()?;
+            self.refresh(&store)?;
         }
 
         Ok(())
@@ -628,21 +648,8 @@ impl CachedCollection {
         Ok(!store.modified_since(self.fetched_at_checkpoint)?)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Object> {
+    pub fn iter(&self) -> impl Iterator<Item = &O> {
         self.objects.iter()
-    }
-
-    pub fn iter_as<
-        'a,
-        T: ObjectShape + std::convert::TryFrom<&'a Object, Error = ConversionError>,
-    >(
-        &'a self,
-    ) -> Result<impl Iterator<Item = T>> {
-        Ok(self
-            .iter()
-            .map(|object| object.try_into().as_store_result())
-            .collect::<Result<Vec<T>>>()?
-            .into_iter())
     }
 
     pub fn len(&self) -> usize {
@@ -976,77 +983,72 @@ mod tests {
 
         let (mut store, _test_dir) = populated_store()?;
 
-        let mut cached_query = store.cached_query(Q.equal("blah", "blah"))?;
+        let mut cached_one_to_one = store.cached_map(Q.equal("blah", "blah"), |x, _| Ok(x))?;
 
         assert_eq!(
-            cached_query.iter().collect::<Vec<_>>(),
+            cached_one_to_one.iter().collect::<Vec<_>>(),
             vec![&object!("name" => "one", "blah" => "blah", "object_id" => 1)]
         );
-        assert_eq!(
-            cached_query.iter_as()?.collect::<Vec<Blah>>(),
-            vec![Blah {
-                name: "one".to_string()
-            }],
-        );
-        assert_eq!(cached_query.len(), 1);
-        assert_eq!(cached_query.valid(&store)?, true);
+        assert_eq!(cached_one_to_one.len(), 1);
+        assert_eq!(cached_one_to_one.exists(), true);
+        assert_eq!(cached_one_to_one.valid(&store)?, true);
 
         let checkpoint = store.checkpoint()?;
         checkpoint.add(object!("name" => "five", "blah" => "blah"))?;
         checkpoint.commit("add new object")?;
 
+        assert_eq!(cached_one_to_one.len(), 1);
+        assert_eq!(cached_one_to_one.exists(), true);
         assert_eq!(
-            store
-                .query(Q.equal("blah", "blah"))
-                .iter()?
-                .collect::<Vec<_>>(),
-            vec![
-                object!("name" => "one", "blah" => "blah", "object_id" => 1),
-                object!("name" => "five", "blah" => "blah", "object_id" => 5),
-            ]
-        );
-        assert_eq!(cached_query.len(), 1);
-        assert_eq!(
-            cached_query.iter().collect::<Vec<_>>(),
+            cached_one_to_one.iter().collect::<Vec<_>>(),
             vec![&object!("name" => "one", "blah" => "blah", "object_id" => 1)]
         );
-        assert_eq!(cached_query.valid(&store)?, false);
+        assert_eq!(cached_one_to_one.valid(&store)?, false);
 
-        cached_query.refresh_if_needed(&store)?;
+        cached_one_to_one.refresh_if_needed(&store)?;
+        assert_eq!(cached_one_to_one.len(), 2);
+        assert_eq!(cached_one_to_one.exists(), true);
         assert_eq!(
-            cached_query.iter().collect::<Vec<_>>(),
+            cached_one_to_one.iter().collect::<Vec<_>>(),
             vec![
                 &object!("name" => "one", "blah" => "blah", "object_id" => 1),
                 &object!("name" => "five", "blah" => "blah", "object_id" => 5),
             ]
         );
-        assert_eq!(
-            cached_query.iter_as()?.collect::<Vec<Blah>>(),
-            vec![
-                Blah {
-                    name: "one".to_string()
-                },
-                Blah {
-                    name: "five".to_string()
-                }
-            ],
-        );
-        assert_eq!(cached_query.len(), 2);
-        assert_eq!(cached_query.valid(&store)?, true);
-
-        let mut cached_existence_query = store.cached_query(Q.equal("name", "six"))?;
-        assert_eq!(cached_existence_query.exists(), false);
+        assert_eq!(cached_one_to_one.valid(&store)?, true);
 
         let checkpoint = store.checkpoint()?;
-        checkpoint.add(object!("name" => "six"))?;
-        checkpoint.commit("add six object")?;
+        checkpoint.query(Q.equal("blah", "blah")).delete()?;
+        checkpoint.commit("delete cached objects")?;
 
-        assert_eq!(cached_existence_query.exists(), false);
-        assert_eq!(cached_existence_query.len(), 0);
+        assert_eq!(cached_one_to_one.len(), 2);
+        assert_eq!(cached_one_to_one.exists(), true);
+        assert_eq!(
+            cached_one_to_one.iter().collect::<Vec<_>>(),
+            vec![
+                &object!("name" => "one", "blah" => "blah", "object_id" => 1),
+                &object!("name" => "five", "blah" => "blah", "object_id" => 5),
+            ]
+        );
+        assert_eq!(cached_one_to_one.valid(&store)?, false);
 
-        cached_existence_query.refresh_if_needed(&store)?;
-        assert_eq!(cached_existence_query.exists(), true);
-        assert_eq!(cached_existence_query.len(), 1);
+        cached_one_to_one.refresh_if_needed(&store)?;
+
+        assert_eq!(cached_one_to_one.len(), 0);
+        assert_eq!(cached_one_to_one.exists(), false);
+        assert_eq!(
+            cached_one_to_one.iter().collect::<Vec<_>>(),
+            Vec::<&Object>::new()
+        );
+        assert_eq!(cached_one_to_one.valid(&store)?, true);
+
+        let cached_extracted_fields = store.cached_map(Q.equal("blah", "halb"), |o, store| {
+            Ok(Blah::try_convert(o, &store)?.name)
+        })?;
+        assert_eq!(
+            cached_extracted_fields.iter().collect::<Vec<_>>(),
+            vec!["two"],
+        );
 
         Ok(())
     }
