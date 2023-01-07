@@ -350,7 +350,7 @@ impl Store {
     pub fn modified_since(&self, a: CheckpointId) -> Result<bool> {
         let b = self.last_checkpoint_id()?;
 
-        return Ok(a < b);
+        return Ok(a != b);
     }
 }
 
@@ -1187,6 +1187,29 @@ mod tests {
             store.query(Q.id(1)).iter()?.collect::<Vec<Object>>(),
             vec![object!("name" => "one", "blah" => "blah", "object_id" => 1)],
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn checkpoint_ids_expire_with_changes_or_undos() -> Result<()> {
+        let (mut store, _test_dir) = populated_store()?;
+
+        let checkpoint = store.checkpoint()?;
+        assert_eq!(checkpoint.query(Q.id(1)).set(object!("name" => "wun"))?, 1);
+        checkpoint.commit("change 1")?;
+
+        let before_change_checkpoint_id = store.last_checkpoint_id()?;
+
+        let checkpoint = store.checkpoint()?;
+        assert_eq!(checkpoint.query(Q.id(1)).set(object!("name" => "wan"))?, 1);
+        checkpoint.commit("change 2")?;
+        assert!(store.modified_since(before_change_checkpoint_id)?);
+
+        let before_undo_checkpoint_id = store.last_checkpoint_id()?;
+
+        store.undo()?;
+        assert!(store.modified_since(before_undo_checkpoint_id)?);
 
         Ok(())
     }
