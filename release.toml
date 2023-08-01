@@ -1,4 +1,2 @@
-no-dev-version = true
 dependent-version = "upgrade"
-# Can't be turned on until https://github.com/sunng87/cargo-release/issues/222 is fixed
-# consolidate-commits = true
+consolidate-commits = true
