@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{query_builder::QueryBuilder, Store, StoreError};
 
 /// All possible types that can be stored inside an [`Object`].
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PropValue {
     Number(i64),
